@@ -1,4 +1,4 @@
-const SHEET_ID = '1lolA_H64xJ2roMYIe6THx723StadhpJqZusi4MGFpdk';
+const SHEET_ID = 'TU_SHEET_ID_AQUI';
 const RESOURCE_SHEET_NAME = "Recursos";
 const CATEGORY_SHEET_NAME = "Categorias";
 const TYPE_SHEET_NAME = "Tipos";
