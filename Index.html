@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <base target="_top">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recursos App</title>
+    <?!= include('Stylesheets'); ?>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+</head>
+<body>
+
+    <aside id="sidebar">
+        <h2>Categorías</h2>
+        <ul id="sidebarCategoryList">
+             <li id="no-sidebar-categories" class="text-gray-500 italic px-4 py-2 hidden">No hay categorías.</li>
+        </ul>
+         <button id="manageCategoriesBtnSidebar" class="btn btn-secondary w-full mt-6">
+             <i class="fas fa-tags"></i> Gestionar
+         </button>
+    </aside>
+
+    <div id="mainContent">
+        <header id="mainHeader">
+            <div class="container">
+                 <button id="hamburgerBtn" class="hamburger-btn lg:hidden">
+                    <i class="fas fa-bars"></i>
+                 </button>
+                 <h1>Recursos App</h1>
+                 <button id="addResourceBtn" class="btn btn-primary">
+                     <i class="fas fa-plus"></i> Añadir Recurso
+                 </button>
+            </div>
+        </header>
+
+        <main id="appContainer">
+             <div id="searchContainer">
+                 <label for="searchInput" class="sr-only">Buscar Recursos</label>
+                 <div class="relative">
+                     <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                          <i class="fas fa-search text-gray-400"></i>
+                     </div>
+                     <input type="search" id="searchInput" placeholder="Buscar recursos..." class="block w-full pl-10 px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm text-gray-900">
+                 </div>
+             </div>
+
+            <div id="cardView" class="view-container">
+                <div id="no-resources-message" class="hidden text-center py-4 text-gray-500 col-span-full">
+                    Cargando recursos...
+                 </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="resourceModal" class="modal">
+        <div class="modal-content">
+            <span class="close-button" id="closeResourceModalBtn">&times;</span>
+            <h2 id="resourceModalTitle" class="text-2xl font-semibold mb-6 text-primary">Añadir Nuevo Recurso</h2>
+            <form id="resourceForm" class="space-y-4">
+                <input type="hidden" id="resourceId">
+                <h3 class="text-lg font-medium text-gray-900 border-b pb-1 mb-3">Información Principal</h3>
+                <div>
+                    <label for="nombre" class="block text-sm font-medium text-gray-700">Nombre <span class="text-red-500">*</span></label>
+                    <input type="text" id="nombre" name="nombre" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm">
+                </div>
+                 <div>
+                    <label for="url" class="block text-sm font-medium text-gray-700">URL Principal <span class="text-red-500">*</span></label>
+                    <input type="url" id="url" name="url" required placeholder="https://ejemplo.com" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm">
+                </div>
+                <div>
+                    <label for="categoria" class="block text-sm font-medium text-gray-700">Categoría <span class="text-red-500">*</span></label>
+                    <select id="categoria" name="categoria" required class="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm">
+                        <option value="">Selecciona una categoría...</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="tipo" class="block text-sm font-medium text-gray-700">Tipo <span class="text-red-500">*</span></label>
+                     <select id="tipo" name="tipo" required class="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm">
+                        <option value="">Cargando tipos...</option>
+                    </select>
+                </div>
+                 <h3 class="text-lg font-medium text-gray-900 border-b pb-1 mb-3 pt-4">Detalles Adicionales</h3>
+                 <div>
+                    <label for="descripcion" class="block text-sm font-medium text-gray-700">Descripción</label>
+                    <textarea id="descripcion" name="descripcion" rows="3" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"></textarea>
+                </div>
+                 <div>
+                    <label for="autor" class="block text-sm font-medium text-gray-700">Autor</label>
+                    <input type="text" id="autor" name="autor" placeholder="Nombre del creador o fuente" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm">
+                </div>
+                 <div>
+                    <label for="recursosAdicionales" class="block text-sm font-medium text-gray-700">Recursos Adicionales (uno por línea)</label>
+                    <textarea id="recursosAdicionales" name="recursosAdicionales" rows="3" placeholder="Pega enlaces relacionados, uno por línea..." class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"></textarea>
+                </div>
+                <div class="flex justify-end pt-4 gap-2">
+                    <button type="button" id="cancelResourceBtn" class="btn btn-secondary">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> Guardar Recurso
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+     <div id="categoryModal" class="modal">
+        <div class="modal-content">
+            <span class="close-button" id="closeCategoryModalBtn">&times;</span>
+            <h2 class="text-2xl font-semibold mb-6 text-primary">Gestionar Categorías</h2>
+            <form id="addCategoryForm" class="flex gap-2 mb-4">
+                <input type="text" id="newCategoryName" placeholder="Nueva categoría" required class="flex-grow px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Añadir
+                </button>
+            </form>
+            <h3 class="text-lg font-medium mb-2">Categorías Existentes:</h3>
+            <ul id="categoryListModal" class="max-h-60 overflow-y-auto border rounded p-2 bg-gray-50">
+                <li id="no-categories-item-modal" class="text-gray-500 italic hidden">No hay categorías existentes.</li>
+            </ul>
+             <div class="flex justify-end pt-4">
+                 <button type="button" id="doneCategoryBtn" class="btn btn-secondary">Cerrar</button>
+             </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <?!= include('JavaScript'); ?>
+
+</body>
+</html>

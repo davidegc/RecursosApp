@@ -1,0 +1,352 @@
+const SHEET_ID = '1lolA_H64xJ2roMYIe6THx723StadhpJqZusi4MGFpdk';
+const RESOURCE_SHEET_NAME = "Recursos";
+const CATEGORY_SHEET_NAME = "Categorias";
+const TYPE_SHEET_NAME = "Tipos";
+
+const COL_MAP = { ID: 1, NOMBRE: 2, DESCRIPCION: 3, URL: 4, CATEGORIA: 5, TIPO: 6, ESTATUS: 7, AUTOR: 8, RECURSOS_ADICIONALES: 9, FAVORITO: 10, CLICKS: 11 };
+
+let SPREADSHEET;
+let RESOURCE_SHEET;
+let CATEGORY_SHEET;
+let TYPE_SHEET;
+
+function getSheet(sheetName) {
+    try {
+        SPREADSHEET = SPREADSHEET || SpreadsheetApp.openById(SHEET_ID);
+        if (!SPREADSHEET) {
+            Logger.log("Error: No se pudo abrir Spreadsheet con ID: " + SHEET_ID);
+            return null;
+        }
+        let sheet = SPREADSHEET.getSheetByName(sheetName);
+        if (!sheet && (sheetName === CATEGORY_SHEET_NAME || sheetName === TYPE_SHEET_NAME)) {
+            sheet = SPREADSHEET.insertSheet(sheetName);
+            if (sheet) {
+                const header = (sheetName === CATEGORY_SHEET_NAME) ? "NOMBRE_CATEGORIA" : "NOMBRE_TIPO";
+                sheet.getRange("A1").setValue(header).setFontWeight("bold");
+                SpreadsheetApp.flush();
+            } else {
+                 Logger.log('Error: No se pudo crear la hoja "' + sheetName + '".');
+                return null;
+            }
+        }
+        if (sheet) {
+           if (sheetName === RESOURCE_SHEET_NAME) RESOURCE_SHEET = sheet;
+           if (sheetName === CATEGORY_SHEET_NAME) CATEGORY_SHEET = sheet;
+           if (sheetName === TYPE_SHEET_NAME) TYPE_SHEET = sheet;
+        }
+        return sheet;
+    } catch (error) {
+        Logger.log("Error en getSheet(" + sheetName + "): " + error);
+        return null;
+    }
+}
+
+function doGet(e) {
+    try {
+        getSheet(RESOURCE_SHEET_NAME);
+        getSheet(CATEGORY_SHEET_NAME);
+        getSheet(TYPE_SHEET_NAME);
+        return HtmlService.createTemplateFromFile('Index')
+            .evaluate()
+            .setTitle('Recursos App')
+            .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+            .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    } catch (error) {
+        Logger.log('Error fatal en doGet: ' + error + ' - Stack: ' + error.stack);
+        return HtmlService.createHtmlOutput('<p>Error al cargar la aplicación: ' + escapeHtml(error.message) + '. Contacta al administrador.</p>');
+    }
+}
+
+function include(filename) {
+    try {
+        return HtmlService.createHtmlOutputFromFile(filename).getContent();
+    } catch (error) {
+        const escapedErrorMessage = JSON.stringify(error.message || String(error));
+        return '<script>console.error("Error al incluir ' + filename + ': " + ' + escapedErrorMessage + ');</script>';
+    }
+}
+
+function escapeHtml(unsafe) {
+    if (typeof unsafe !== 'string') return unsafe;
+    return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+function getRowAsObject(rowArray) {
+    if (!rowArray || rowArray.length < Object.keys(COL_MAP).length) return null;
+    return {
+        id: rowArray[COL_MAP.ID - 1],
+        nombre: rowArray[COL_MAP.NOMBRE - 1] || '',
+        descripcion: rowArray[COL_MAP.DESCRIPCION - 1] || '',
+        url: rowArray[COL_MAP.URL - 1] || '',
+        categoria: String(rowArray[COL_MAP.CATEGORIA - 1] || '').toUpperCase(),
+        tipo: rowArray[COL_MAP.TIPO - 1] || '',
+        estatus: rowArray[COL_MAP.ESTATUS - 1] || 'Activo',
+        autor: rowArray[COL_MAP.AUTOR - 1] || '',
+        recursosAdicionales: rowArray[COL_MAP.RECURSOS_ADICIONALES - 1] || '',
+        favorito: String(rowArray[COL_MAP.FAVORITO - 1]).toUpperCase() === 'TRUE',
+        clicks: parseInt(rowArray[COL_MAP.CLICKS - 1], 10) || 0
+    };
+}
+
+function findRowIndexById(sheet, id) {
+    if (!sheet || !id) return -1;
+    const data = sheet.getRange(2, COL_MAP.ID, sheet.getLastRow() - 1, 1).getValues();
+    for (let i = 0; i < data.length; i++) {
+        if (String(data[i][0]) === String(id)) {
+            return i + 2;
+        }
+    }
+    return -1;
+}
+
+function getResources() {
+    try {
+        const sheet = getSheet(RESOURCE_SHEET_NAME);
+        if (!sheet) return { success: false, message: 'Hoja de recursos no encontrada.' };
+        const values = sheet.getDataRange().getValues();
+        const resources = [];
+        for (let i = 1; i < values.length; i++) {
+            if (values[i][COL_MAP.ID - 1]) {
+                 const resourceObj = getRowAsObject(values[i]);
+                 if(resourceObj) resources.push(resourceObj);
+            }
+        }
+        return { success: true, data: resources };
+    } catch (error) {
+        return { success: false, message: 'Error al obtener recursos: ' + error.message };
+    }
+}
+
+function addResource(resourceData) {
+    try {
+        const sheet = getSheet(RESOURCE_SHEET_NAME);
+        if (!sheet) throw new Error('Hoja de recursos no encontrada.');
+        const requiredFields = ['nombre', 'url', 'categoria', 'tipo'];
+        if (requiredFields.some(field => !resourceData[field])) {
+            throw new Error('Faltan campos obligatorios: ' + requiredFields.filter(field => !resourceData[field]).join(', '));
+        }
+        resourceData.id = Utilities.getUuid();
+        resourceData.estatus = 'Activo';
+        resourceData.clicks = 0;
+        resourceData.favorito = false;
+        resourceData.nombre = String(resourceData.nombre).toUpperCase();
+        resourceData.categoria = String(resourceData.categoria).toUpperCase();
+        const newRow = [];
+        newRow[COL_MAP.ID - 1] = resourceData.id;
+        newRow[COL_MAP.NOMBRE - 1] = resourceData.nombre;
+        newRow[COL_MAP.DESCRIPCION - 1] = resourceData.descripcion || '';
+        newRow[COL_MAP.URL - 1] = resourceData.url;
+        newRow[COL_MAP.CATEGORIA - 1] = resourceData.categoria;
+        newRow[COL_MAP.TIPO - 1] = resourceData.tipo;
+        newRow[COL_MAP.ESTATUS - 1] = resourceData.estatus;
+        newRow[COL_MAP.AUTOR - 1] = resourceData.autor || '';
+        newRow[COL_MAP.RECURSOS_ADICIONALES - 1] = resourceData.recursosAdicionales || '';
+        newRow[COL_MAP.FAVORITO - 1] = resourceData.favorito;
+        newRow[COL_MAP.CLICKS - 1] = resourceData.clicks;
+        sheet.appendRow(newRow);
+        addCategoryIfNotExists(resourceData.categoria);
+        return { success: true, data: resourceData };
+    } catch (error) {
+        return { success: false, message: 'Error al añadir recurso: ' + error.message };
+    }
+}
+
+function updateResource(resourceData) {
+    try {
+        const sheet = getSheet(RESOURCE_SHEET_NAME);
+        if (!sheet) throw new Error('Hoja de recursos no encontrada.');
+        if (!resourceData || !resourceData.id) throw new Error("ID del recurso es requerido para actualizar.");
+        const rowIndex = findRowIndexById(sheet, resourceData.id);
+        if (rowIndex === -1) throw new Error('Recurso con ID "' + resourceData.id + '" no encontrado.');
+        const requiredFields = ['nombre', 'url', 'categoria', 'tipo'];
+         if (requiredFields.some(field => !resourceData[field])) {
+            throw new Error('Faltan campos obligatorios: ' + requiredFields.filter(field => !resourceData[field]).join(', '));
+        }
+        resourceData.nombre = String(resourceData.nombre).toUpperCase();
+        resourceData.categoria = String(resourceData.categoria).toUpperCase();
+        sheet.getRange(rowIndex, COL_MAP.NOMBRE).setValue(resourceData.nombre);
+        sheet.getRange(rowIndex, COL_MAP.DESCRIPCION).setValue(resourceData.descripcion || '');
+        sheet.getRange(rowIndex, COL_MAP.URL).setValue(resourceData.url);
+        sheet.getRange(rowIndex, COL_MAP.CATEGORIA).setValue(resourceData.categoria);
+        sheet.getRange(rowIndex, COL_MAP.TIPO).setValue(resourceData.tipo);
+        sheet.getRange(rowIndex, COL_MAP.AUTOR).setValue(resourceData.autor || '');
+        sheet.getRange(rowIndex, COL_MAP.RECURSOS_ADICIONALES).setValue(resourceData.recursosAdicionales || '');
+        addCategoryIfNotExists(resourceData.categoria);
+        const updatedRow = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+        const updatedResourceData = getRowAsObject(updatedRow);
+        return { success: true, data: updatedResourceData };
+    } catch (error) {
+        return { success: false, message: 'Error al actualizar recurso: ' + error.message };
+    }
+}
+
+function updateResourceStatus(id, newStatus) {
+   try {
+        const sheet = getSheet(RESOURCE_SHEET_NAME);
+        if (!sheet) throw new Error('Hoja de recursos no encontrada.');
+        if (!id || (newStatus !== 'Activo' && newStatus !== 'Inactivo')) {
+            throw new Error("ID y estatus válido ('Activo' o 'Inactivo') son requeridos.");
+        }
+        const rowIndex = findRowIndexById(sheet, id);
+        if (rowIndex === -1) throw new Error('Recurso con ID "' + id + '" no encontrado.');
+        let favoritoRemoved = false;
+        sheet.getRange(rowIndex, COL_MAP.ESTATUS).setValue(newStatus);
+        if (newStatus === 'Inactivo') {
+            const currentFav = String(sheet.getRange(rowIndex, COL_MAP.FAVORITO).getValue()).toUpperCase();
+            if (currentFav === 'TRUE') {
+                sheet.getRange(rowIndex, COL_MAP.FAVORITO).setValue(false);
+                favoritoRemoved = true;
+            }
+        }
+        return { success: true, id: id, newStatus: newStatus, favoritoRemoved: favoritoRemoved };
+    } catch (error) {
+        return { success: false, message: 'Error al actualizar estatus: ' + error.message };
+    }
+}
+
+function updateResourceFavorite(id, isFavorite) {
+   try {
+        const sheet = getSheet(RESOURCE_SHEET_NAME);
+        if (!sheet) throw new Error('Hoja de recursos no encontrada.');
+        if (!id || typeof isFavorite !== 'boolean') {
+            throw new Error("ID y estado booleano de favorito son requeridos.");
+        }
+        const rowIndex = findRowIndexById(sheet, id);
+        if (rowIndex === -1) throw new Error('Recurso con ID "' + id + '" no encontrado.');
+        if (String(sheet.getRange(rowIndex, COL_MAP.ESTATUS).getValue()) === 'Inactivo' && isFavorite) {
+           throw new Error("No se puede marcar como favorito un recurso inactivo.");
+        }
+        sheet.getRange(rowIndex, COL_MAP.FAVORITO).setValue(isFavorite);
+        return { success: true, id: id, isFavorite: isFavorite };
+    } catch (error) {
+        return { success: false, message: 'Error al actualizar favorito: ' + error.message };
+    }
+}
+
+function incrementResourceClick(id) {
+   try {
+        const sheet = getSheet(RESOURCE_SHEET_NAME);
+        if (!sheet) return { success: false, message: 'Hoja de recursos no encontrada.' };
+        if (!id) throw new Error("ID del recurso es requerido.");
+        const rowIndex = findRowIndexById(sheet, id);
+        if (rowIndex === -1) {
+            return { success: false, message: 'Recurso con ID "' + id + '" no encontrado.' };
+        }
+        const clicksRange = sheet.getRange(rowIndex, COL_MAP.CLICKS);
+        const currentClicks = parseInt(clicksRange.getValue(), 10) || 0;
+        const newClicks = currentClicks + 1;
+        clicksRange.setValue(newClicks);
+        return { success: true, id: id, clicks: newClicks };
+    } catch (error) {
+        return { success: false, message: 'Error al incrementar clicks: ' + error.message };
+    }
+}
+
+function getCategories() {
+    try {
+        const sheet = getSheet(CATEGORY_SHEET_NAME);
+        if (!sheet) return { success: false, message: 'Hoja de categorías no encontrada.' };
+        const lastRow = sheet.getLastRow();
+        if (lastRow < 2) return { success: true, data: [] };
+        const range = sheet.getRange(2, 1, lastRow - 1, 1);
+        const values = range.getValues();
+        const categories = values.map(row => row[0]).filter(String).map(cat => String(cat).trim().toUpperCase()).filter(cat => cat.length > 0);
+        const uniqueCategories = [...new Set(categories)];
+        uniqueCategories.sort((a, b) => a.localeCompare(b));
+        return { success: true, data: uniqueCategories };
+    } catch (error) {
+        return { success: false, message: 'Error al obtener categorías: ' + error.message };
+    }
+}
+
+function addCategory(categoryName) {
+    const trimmedName = String(categoryName || '').trim();
+    if (!trimmedName) {
+        return { success: false, message: 'El nombre de la categoría no puede estar vacío.' };
+    }
+    return addCategoryIfNotExists(trimmedName);
+}
+
+function addCategoryIfNotExists(categoryName) {
+    try {
+        const upperCategoryName = String(categoryName).trim().toUpperCase();
+        if (!upperCategoryName) return { success: false, message: 'Nombre de categoría vacío.' };
+        const categoriesResult = getCategories();
+        if (!categoriesResult.success) throw new Error(categoriesResult.message || 'Error al obtener hoja de categorías.');
+        const sheet = getSheet(CATEGORY_SHEET_NAME);
+        if (!sheet) throw new Error('La hoja ' + CATEGORY_SHEET_NAME + ' no pudo ser encontrada.');
+        const existingCategories = categoriesResult.data;
+        if (!existingCategories.includes(upperCategoryName)) {
+            sheet.appendRow([upperCategoryName]);
+            return { success: true, added: true, category: upperCategoryName };
+        } else {
+            return { success: true, added: false, category: upperCategoryName };
+        }
+    } catch (error) {
+        return { success: false, message: 'Error interno al añadir categoría: ' + error.message };
+    }
+}
+
+function updateCategory(oldName, newName) {
+    try {
+        const trimmedOldName = String(oldName || '').trim();
+        const trimmedNewName = String(newName || '').trim();
+        if (!trimmedOldName || !trimmedNewName) throw new Error("Nombres de categoría no pueden estar vacíos.");
+        const catSheet = getSheet(CATEGORY_SHEET_NAME);
+        const resSheet = getSheet(RESOURCE_SHEET_NAME);
+        if (!catSheet) throw new Error('Hoja "' + CATEGORY_SHEET_NAME + '" no encontrada.');
+        if (!resSheet) throw new Error('Hoja "' + RESOURCE_SHEET_NAME + '" no encontrada.');
+        const upperOldName = trimmedOldName.toUpperCase();
+        const upperNewName = trimmedNewName.toUpperCase();
+        if (upperOldName === upperNewName) return { success: true, message: "Nombres iguales.", updatedResources: 0 };
+        const categoriesResult = getCategories();
+        if (!categoriesResult.success) throw new Error(categoriesResult.message);
+        const existingCategories = categoriesResult.data;
+        if (existingCategories.includes(upperNewName)) throw new Error('La categoría "' + upperNewName + '" ya existe.');
+        if (!existingCategories.includes(upperOldName)) throw new Error('Categoría original "' + upperOldName + '" no encontrada.');
+        const categoryData = catSheet.getRange("A2:A" + catSheet.getLastRow()).getValues();
+        let categoryRowIndex = -1;
+        for (let i = 0; i < categoryData.length; i++) {
+            if (String(categoryData[i][0]).trim().toUpperCase() === upperOldName) {
+                categoryRowIndex = i + 2; break;
+            }
+        }
+        if (categoryRowIndex === -1) throw new Error('Categoría original "' + upperOldName + '" no encontrada en hoja.');
+        catSheet.getRange(categoryRowIndex, 1).setValue(upperNewName);
+        const resourceDataRange = resSheet.getDataRange();
+        const resourceData = resourceDataRange.getValues();
+        let updatedCount = 0;
+        const updates = [];
+        for (let i = 1; i < resourceData.length; i++) {
+            const currentCategory = String(resourceData[i][COL_MAP.CATEGORIA - 1]).trim().toUpperCase();
+            if (currentCategory === upperOldName) {
+                updates.push({ range: resSheet.getRange(i + 1, COL_MAP.CATEGORIA), value: upperNewName });
+                updatedCount++;
+            }
+        }
+        if (updates.length > 0) {
+            updates.forEach(update => update.range.setValue(update.value));
+            SpreadsheetApp.flush();
+        }
+        return { success: true, oldName: upperOldName, newName: upperNewName, updatedResources: updatedCount };
+    } catch (error) {
+        return { success: false, message: 'Error al actualizar categoría: ' + error.message };
+    }
+}
+
+function getResourceTypes() {
+    try {
+        const sheet = getSheet(TYPE_SHEET_NAME);
+        if (!sheet) return { success: false, message: 'Hoja "' + TYPE_SHEET_NAME + '" no encontrada.' };
+        const lastRow = sheet.getLastRow();
+        if (lastRow < 2) return { success: true, data: [] };
+        const range = sheet.getRange(2, 1, lastRow - 1, 1);
+        const values = range.getValues();
+        const types = values.map(row => row[0]).filter(String).map(type => String(type).trim()).filter(type => type.length > 0);
+        const uniqueTypes = [...new Set(types)];
+        uniqueTypes.sort((a, b) => a.localeCompare(b));
+        return { success: true, data: uniqueTypes };
+    } catch (error) {
+        return { success: false, message: 'Error al obtener tipos: ' + error.message };
+    }
+}
