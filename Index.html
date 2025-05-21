@@ -10,48 +10,69 @@
 </head>
 <body>
 
-    <aside id="sidebar">
-        <h2>Categorías</h2>
-        <ul id="sidebarCategoryList">
-             <li id="no-sidebar-categories" class="text-gray-500 italic px-4 py-2 hidden">No hay categorías.</li>
-        </ul>
-         <button id="manageCategoriesBtnSidebar" class="btn btn-secondary w-full mt-6">
-             <i class="fas fa-tags"></i> Gestionar
-         </button>
-    </aside>
-
     <div id="mainContent">
-        <header id="mainHeader">
-            <div class="container">
-                 <button id="hamburgerBtn" class="hamburger-btn lg:hidden">
-                    <i class="fas fa-bars"></i>
-                 </button>
-                 <h1>Recursos App</h1>
-                 <button id="addResourceBtn" class="btn btn-primary">
-                     <i class="fas fa-plus"></i> Añadir Recurso
-                 </button>
-            </div>
-        </header>
+        <div id="scrollableContentArea">
+            <section id="titleSection" class="app-container mx-auto px-4 pt-8 pb-6 text-center">
+                <h2 class="text-3xl sm:text-4xl font-bold text-primary mb-2">Catálogo de Recursos</h2>
+                <p class="text-gray-600 text-sm sm:text-base">Aquí puedes encontrar una variedad de recursos útiles y bien organizados.</p>
+            </section>
 
-        <main id="appContainer">
-             <div id="searchContainer">
-                 <label for="searchInput" class="sr-only">Buscar Recursos</label>
-                 <div class="relative">
-                     <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                          <i class="fas fa-search text-gray-400"></i>
-                     </div>
-                     <input type="search" id="searchInput" placeholder="Buscar recursos..." class="block w-full pl-10 px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm text-gray-900">
-                 </div>
-             </div>
+            <section id="searchActionsSection" class="app-container mx-auto px-4 pb-4 pt-2 bg-gray-light z-10">
+                <div class="flex flex-col sm:flex-row items-center gap-3 sm:gap-4">
+                    <div class="relative flex-grow w-full">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i class="fas fa-search text-gray-400"></i>
+                        </div>
+                        <input type="search" id="searchInput" placeholder="Buscar recursos..." class="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm text-gray-900">
+                    </div>
+                    <div class="header-actions flex items-center gap-2">
+                        <button id="addResourceBtn" class="btn btn-icon btn-primary-alt" title="Añadir Recurso">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                        <button id="manageCategoriesBtnHeader" class="btn btn-icon btn-secondary-alt" title="Gestionar Categorías">
+                            <i class="fas fa-tags"></i>
+                        </button>
+                    </div>
+                </div>
+            </section>
 
-            <div id="cardView" class="view-container">
-                <div id="no-resources-message" class="hidden text-center py-4 text-gray-500 col-span-full">
-                    Cargando recursos...
-                 </div>
-            </div>
-        </main>
-    </div>
+            <section id="horizontalCategoryTagsContainer" class="app-container mx-auto px-4 py-3">
+                <div id="categoryTags" class="flex flex-wrap justify-center gap-2 sm:gap-3">
+                    <span id="category-tags-placeholder" class="text-gray-500 italic">Cargando categorías...</span>
+                </div>
+            </section>
 
+            <section id="summarySortSection" class="app-container mx-auto px-4 py-3 flex flex-col sm:flex-row justify-between items-center gap-2">
+                <span id="totalResourcesCount" class="text-sm text-gray-700 font-medium">Total: 0 recursos</span>
+                <div class="relative">
+                    <select id="sortResourcesDropdown" class="appearance-none bg-white border border-gray-300 text-gray-700 py-2 px-3 pr-8 rounded-md leading-tight focus:outline-none focus:bg-white focus:border-primary text-sm">
+                        <option value="default">Por Defecto (Favoritos, Clicks)</option>
+                        <option value="name_asc">Nombre (A-Z)</option>
+                        <option value="name_desc">Nombre (Z-A)</option>
+                        <option value="clicks_desc">Más Clickeados</option>
+                        <option value="clicks_asc">Menos Clickeados</option>
+                        <option value="favorites_first">Favoritos Primero</option>
+                        <option value="recent">Recientes (Nombre A-Z)</option>
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
+                        <i class="fas fa-chevron-down text-xs"></i>
+                    </div>
+                </div>
+            </section>
+
+            <main id="appContainer" class="app-container mx-auto px-4 pb-6">
+                <div id="cardView" class="view-container grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+                    <div id="no-resources-message" class="hidden text-center py-8 text-gray-500 col-span-full">
+                        Cargando recursos...
+                    </div>
+                </div>
+                <div id="loadMoreContainer" class="text-center mt-6">
+                    <button id="loadMoreBtn" class="btn btn-primary hidden">Mostrar Más Recursos</button>
+                </div>
+            </main>
+        </div> 
+    </div> 
+    
     <div id="resourceModal" class="modal">
         <div class="modal-content">
             <span class="close-button" id="closeResourceModalBtn">&times;</span>
@@ -63,7 +84,7 @@
                     <label for="nombre" class="block text-sm font-medium text-gray-700">Nombre <span class="text-red-500">*</span></label>
                     <input type="text" id="nombre" name="nombre" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm">
                 </div>
-                 <div>
+                <div>
                     <label for="url" class="block text-sm font-medium text-gray-700">URL Principal <span class="text-red-500">*</span></label>
                     <input type="url" id="url" name="url" required placeholder="https://ejemplo.com" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm">
                 </div>
@@ -75,20 +96,20 @@
                 </div>
                 <div>
                     <label for="tipo" class="block text-sm font-medium text-gray-700">Tipo <span class="text-red-500">*</span></label>
-                     <select id="tipo" name="tipo" required class="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm">
+                    <select id="tipo" name="tipo" required class="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm">
                         <option value="">Cargando tipos...</option>
                     </select>
                 </div>
-                 <h3 class="text-lg font-medium text-gray-900 border-b pb-1 mb-3 pt-4">Detalles Adicionales</h3>
-                 <div>
+                <h3 class="text-lg font-medium text-gray-900 border-b pb-1 mb-3 pt-4">Detalles Adicionales</h3>
+                <div>
                     <label for="descripcion" class="block text-sm font-medium text-gray-700">Descripción</label>
                     <textarea id="descripcion" name="descripcion" rows="3" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"></textarea>
                 </div>
-                 <div>
+                <div>
                     <label for="autor" class="block text-sm font-medium text-gray-700">Autor</label>
                     <input type="text" id="autor" name="autor" placeholder="Nombre del creador o fuente" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm">
                 </div>
-                 <div>
+                <div>
                     <label for="recursosAdicionales" class="block text-sm font-medium text-gray-700">Recursos Adicionales (uno por línea)</label>
                     <textarea id="recursosAdicionales" name="recursosAdicionales" rows="3" placeholder="Pega enlaces relacionados, uno por línea..." class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"></textarea>
                 </div>
@@ -102,7 +123,7 @@
         </div>
     </div>
 
-     <div id="categoryModal" class="modal">
+    <div id="categoryModal" class="modal">
         <div class="modal-content">
             <span class="close-button" id="closeCategoryModalBtn">&times;</span>
             <h2 class="text-2xl font-semibold mb-6 text-primary">Gestionar Categorías</h2>
@@ -116,9 +137,9 @@
             <ul id="categoryListModal" class="max-h-60 overflow-y-auto border rounded p-2 bg-gray-50">
                 <li id="no-categories-item-modal" class="text-gray-500 italic hidden">No hay categorías existentes.</li>
             </ul>
-             <div class="flex justify-end pt-4">
-                 <button type="button" id="doneCategoryBtn" class="btn btn-secondary">Cerrar</button>
-             </div>
+            <div class="flex justify-end pt-4">
+                <button type="button" id="doneCategoryBtn" class="btn btn-secondary">Cerrar</button>
+            </div>
         </div>
     </div>
 

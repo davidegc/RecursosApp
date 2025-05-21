@@ -1,17 +1,29 @@
 <script>
-  let addResourceBtn, manageCategoriesBtnSidebar, resourceModal, categoryModal,
+  const ALL_CATEGORIES_FILTER = "__ALL__";
+  const INITIAL_RESOURCES_TO_DISPLAY = 24;
+  const RESOURCES_INCREMENT = 12;
+
+  let addResourceBtn, manageCategoriesBtnHeader,
+      resourceModal, categoryModal,
       closeResourceModalBtn, closeCategoryModalBtn, cancelResourceBtn, doneCategoryBtn,
       resourceForm, addCategoryForm, cardViewContainer, resourceModalTitle,
-      resourceIdInput, noResourcesMessage, noCategoriesItemModal, noSidebarCategories,
-      searchInput, categoryListUlModal, sidebarCategoryListUl, categoriaSelect, mainContent,
-      tipoSelect, hamburgerBtn, sidebar;
+      resourceIdInput, noResourcesMessage, noCategoriesItemModal, 
+      searchInput, categoryListUlModal, 
+      categoryTagsContainer, categoryTagsPlaceholder,
+      categoriaSelect, tipoSelect,
+      totalResourcesCountSpan, sortResourcesDropdown,
+      loadMoreBtn;
 
   let resources = [];
   let categories = [];
   let resourceTypes = [];
-  let filteredResources = [];
+  
+  let allFilteredForPagination = []; 
+  let currentlyDisplayedCount = 0; 
+
   let editMode = false;
-  let highlightedCategory = null;
+  let highlightedCategory = ALL_CATEGORIES_FILTER;
+  let currentSortCriteria = 'default'; 
 
   const Toast = Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false, timer: 3000, timerProgressBar: true, didOpen: (toast) => { toast.addEventListener('mouseenter', Swal.stopTimer); toast.addEventListener('mouseleave', Swal.resumeTimer); } });
   const showAlert = (title, icon = 'success', text = '') => Toast.fire({ icon: icon, title: title, text: text });
@@ -21,12 +33,9 @@
   const escapeHtml = (unsafe) => {
       if (typeof unsafe !== 'string') return unsafe;
       return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-   };
-   const generateCategoryId = (categoryName) => {
-      const safeName = String(categoryName || 'sin-categoria');
-      return 'category-group-' + safeName.replace(/[^a-zA-Z0-9\-_]/g, '-').toLowerCase();
   };
-   const truncateUrl = (url, maxLength = 50) => {
+  
+  const truncateUrl = (url, maxLength = 50) => {
       if (!url) return '-';
       try {
           const urlObj = new URL(url.startsWith('http') ? url : 'http://' + url);
@@ -40,56 +49,81 @@
       }
   };
 
-  function showLoadingIndicator(show, message = "Cargando...") {
-      if (!noResourcesMessage) return;
+  function showCardLoadingIndicator(show, message = "Cargando recursos...") {
+      if (!noResourcesMessage || !cardViewContainer) return;
       noResourcesMessage.textContent = message;
-      noResourcesMessage.classList.toggle('hidden', !show);
+      if (show) {
+          noResourcesMessage.classList.remove('hidden');
+          noResourcesMessage.classList.add('col-span-full'); 
+          cardViewContainer.innerHTML = ''; 
+          cardViewContainer.appendChild(noResourcesMessage);
+      } else {
+          noResourcesMessage.classList.add('hidden');
+      }
   }
-
+  
   function handleFailure(error, context = "Operación") {
-      console.error('Error en ' + context + ':', error);
       const errorMessage = (error && error.message) ? error.message : (error ? String(error) : 'Error desconocido');
-      showErrorAlert('Error', 'No se pudo completar: ' + context + '. ' + errorMessage);
-      showLoadingIndicator(false);
+      showErrorAlert('Error', `No se pudo completar: ${context}. ${errorMessage}`);
+      showCardLoadingIndicator(false); 
+      if (context === "Cargar Categorías" && categoryTagsPlaceholder && categoryTagsContainer) {
+          categoryTagsContainer.innerHTML = '';
+          categoryTagsPlaceholder.textContent = "Error al cargar categorías.";
+          categoryTagsPlaceholder.classList.remove('hidden');
+          categoryTagsContainer.appendChild(categoryTagsPlaceholder);
+      }
       Swal.close();
   }
 
   function loadInitialData() {
-      showLoadingIndicator(true, "Cargando datos iniciales...");
-      google.script.run.withSuccessHandler(onCategoriesLoaded).withFailureHandler(e => handleFailure(e, "Cargar Categorías")).getCategories();
-      google.script.run.withSuccessHandler(onResourceTypesLoaded).withFailureHandler(e => handleFailure(e, "Cargar Tipos")).getResourceTypes();
+      if (categoryTagsPlaceholder && categoryTagsContainer) {
+          categoryTagsContainer.innerHTML = ''; 
+          categoryTagsPlaceholder.textContent = "Cargando categorías...";
+          categoryTagsPlaceholder.classList.remove('hidden');
+          categoryTagsContainer.appendChild(categoryTagsPlaceholder);
+      }
+      showCardLoadingIndicator(true, "Cargando datos iniciales...");
+      currentlyDisplayedCount = 0; 
+      
+      google.script.run.withSuccessHandler(onCategoriesLoaded)
+          .withFailureHandler(e => handleFailure(e, "Cargar Categorías"))
+          .getCategories();
+      
+      google.script.run.withSuccessHandler(onResourceTypesLoaded)
+          .withFailureHandler(e => handleFailure(e, "Cargar Tipos"))
+          .getResourceTypes();
   }
 
   function onCategoriesLoaded(result) {
       if (result && result.success) {
-          categories = Array.isArray(result.data) ? result.data : [];
-          if (highlightedCategory === null && categories.length > 0) {
-              highlightedCategory = categories[0];
-          }
-          renderCategoryLists();
-          populateCategorySelect();
-          showLoadingIndicator(true, "Cargando recursos...");
-          google.script.run.withSuccessHandler(onResourcesLoaded).withFailureHandler(e => handleFailure(e, "Cargar Recursos")).getResources();
+          categories = Array.isArray(result.data) ? result.data.sort((a,b) => a.localeCompare(b)) : [];
+          renderHorizontalCategoryTags();
+          populateCategorySelect(); 
       } else {
           handleFailure(result || { message: "Error desconocido al cargar categorías." }, "Cargar Categorías");
+          categories = []; 
+          renderHorizontalCategoryTags(); 
       }
+      google.script.run.withSuccessHandler(onResourcesLoaded)
+          .withFailureHandler(e => handleFailure(e, "Cargar Recursos"))
+          .getResources();
   }
 
-   function onResourceTypesLoaded(result) {
+  function onResourceTypesLoaded(result) {
       if (result && result.success) {
-          resourceTypes = Array.isArray(result.data) ? result.data : [];
+          resourceTypes = Array.isArray(result.data) ? result.data.sort((a,b) => a.localeCompare(b)) : [];
           populateResourceTypeSelect();
       } else {
           handleFailure(result || { message: "Error desconocido al cargar tipos." }, "Cargar Tipos");
+          resourceTypes = [];
           populateResourceTypeSelect(['Enlace', 'Herramienta Web', 'Software', 'Documentación', 'Otro']);
       }
   }
 
   function onResourcesLoaded(result) {
-      showLoadingIndicator(false);
       if (result && result.success) {
           resources = Array.isArray(result.data) ? result.data : [];
-          resources.forEach(r => {
+          resources.forEach(r => { 
               r.favorito = r.favorito === true;
               r.autor = r.autor || '';
               r.recursosAdicionales = r.recursosAdicionales || '';
@@ -98,244 +132,539 @@
               r.estatus = (r.estatus === 'Activo' || r.estatus === 'Inactivo') ? r.estatus : 'Activo';
               if (r.estatus === 'Inactivo') r.favorito = false;
           });
-          renderCategoryLists();
-          filterAndRender();
       } else {
           handleFailure(result || { message: "Error desconocido al cargar recursos." }, "Cargar Recursos");
-          if (noResourcesMessage) {
-             noResourcesMessage.textContent = 'Error al cargar recursos: ' + ((result && result.message) ? result.message : 'desconocido');
-             noResourcesMessage.classList.remove('hidden');
-          }
-          if(cardViewContainer) cardViewContainer.innerHTML = '';
+          resources = []; 
       }
+      filterAndApplyPagination(); 
+      showCardLoadingIndicator(false); 
   }
+  
+  const renderHorizontalCategoryTags = () => {
+      if (!categoryTagsContainer || !categoryTagsPlaceholder) return;
+      categoryTagsContainer.innerHTML = ''; 
 
-  const handleCategoryLinkClick = (event) => {
-       event.preventDefault();
-       const clickedCategory = event.currentTarget.dataset.category;
-       const targetId = event.currentTarget.getAttribute('href');
-       highlightedCategory = clickedCategory;
-       document.querySelectorAll('#sidebarCategoryList .category-filter').forEach(link => link.classList.remove('active'));
-       event.currentTarget.classList.add('active');
-       if (targetId && targetId.startsWith('#')) {
-           try {
-               const targetElement = document.getElementById(targetId.substring(1));
-               if (targetElement) { targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-               else { if (mainContent) mainContent.scrollTo({ top: 0, behavior: 'smooth' }); }
-           } catch (e) { if (mainContent) mainContent.scrollTo({ top: 0, behavior: 'smooth' }); }
-       } else { if (mainContent) mainContent.scrollTo({ top: 0, behavior: 'smooth' }); }
-       if (window.innerWidth <= 1024) { toggleSidebar(false); }
-   };
+      if (categories.length === 0) {
+          categoryTagsPlaceholder.textContent = "No hay categorías disponibles.";
+          categoryTagsPlaceholder.classList.remove('hidden'); 
+          categoryTagsContainer.appendChild(categoryTagsPlaceholder);
+      } else {
+          categoryTagsPlaceholder.classList.add('hidden'); 
+          const allTag = document.createElement('button');
+          allTag.className = 'category-tag';
+          allTag.dataset.category = ALL_CATEGORIES_FILTER;
+          allTag.textContent = 'Todas';
+          if (highlightedCategory === ALL_CATEGORIES_FILTER) allTag.classList.add('active');
+          allTag.addEventListener('click', handleCategoryTagClick);
+          categoryTagsContainer.appendChild(allTag);
 
-  const renderCategoryLists = () => {
-      if (!sidebarCategoryListUl || !categoryListUlModal) return;
-      sidebarCategoryListUl.innerHTML = ''; categoryListUlModal.innerHTML = '';
-      const sortedCategories = [...categories].sort((a, b) => a.localeCompare(b));
-      const showNoCategories = sortedCategories.length === 0;
-      if(noCategoriesItemModal) noCategoriesItemModal.classList.toggle('hidden', !showNoCategories);
-      if(noSidebarCategories) noSidebarCategories.classList.toggle('hidden', !showNoCategories);
-      if(showNoCategories && categoryListUlModal) categoryListUlModal.appendChild(noCategoriesItemModal);
-      if (highlightedCategory === null && sortedCategories.length > 0) { highlightedCategory = sortedCategories[0]; }
-      const categoryCounts = resources.reduce((counts, resource) => { const cat = resource.categoria || 'Sin categoría'; counts[cat] = (counts[cat] || 0) + 1; return counts; }, {});
-      sortedCategories.forEach(category => {
-          const categoryId = generateCategoryId(category); const count = categoryCounts[category] || 0;
-          const liModal = document.createElement('li'); liModal.dataset.categoryName = category;
-          liModal.innerHTML = '<div class="category-display flex-grow mr-4"><span>' + escapeHtml(category) + '</span></div><div class="category-actions"><button class="edit-category-btn action-btn" title="Editar ' + escapeHtml(category) + '"><i class="fas fa-pencil-alt"></i></button></div>';
-          const editBtnModal = liModal.querySelector('.edit-category-btn'); if (editBtnModal) editBtnModal.addEventListener('click', handleStartEditCategory); categoryListUlModal.appendChild(liModal);
-          const liSidebar = document.createElement('li'); const linkSidebar = document.createElement('a'); linkSidebar.href = '#' + categoryId; linkSidebar.className = 'category-filter block'; linkSidebar.dataset.category = category;
-          linkSidebar.innerHTML = '<span class="category-name">' + escapeHtml(category) + '</span><span class="category-count">(' + count + ')</span>';
-          if (category === highlightedCategory) { linkSidebar.classList.add('active'); }
-          linkSidebar.addEventListener('click', handleCategoryLinkClick); liSidebar.appendChild(linkSidebar); sidebarCategoryListUl.appendChild(liSidebar);
-      });
-       if (highlightedCategory) {
-            const activeLink = sidebarCategoryListUl.querySelector('.category-filter.active');
-            if (!activeLink && sortedCategories.length > 0) { highlightedCategory = sortedCategories[0]; const firstLink = sidebarCategoryListUl.querySelector('.category-filter'); if (firstLink) firstLink.classList.add('active'); }
-       }
+          categories.forEach(category => {
+              const tag = document.createElement('button');
+              tag.className = 'category-tag';
+              tag.dataset.category = category;
+              tag.textContent = escapeHtml(category);
+              if (category === highlightedCategory) tag.classList.add('active');
+              tag.addEventListener('click', handleCategoryTagClick);
+              categoryTagsContainer.appendChild(tag);
+          });
+      }
   };
 
+  const handleCategoryTagClick = (event) => {
+      event.preventDefault();
+      const clickedCategoryValue = event.currentTarget.dataset.category;
+      if (highlightedCategory === clickedCategoryValue) return; 
+      highlightedCategory = clickedCategoryValue;
+      if (categoryTagsContainer) {
+          categoryTagsContainer.querySelectorAll('.category-tag').forEach(tag => tag.classList.remove('active'));
+      }
+      event.currentTarget.classList.add('active');
+      filterAndApplyPagination(); 
+  };
+  
   const populateCategorySelect = () => {
-       if (!categoriaSelect) return;
-       const currentCategoryValue = categoriaSelect.value; categoriaSelect.innerHTML = '<option value="">Selecciona una categoría...</option>';
-       const sortedCategories = [...categories].sort((a, b) => a.localeCompare(b));
-       sortedCategories.forEach(category => { const option = document.createElement('option'); option.value = category; option.textContent = category; categoriaSelect.appendChild(option); });
-       if (categories.includes(currentCategoryValue)) { categoriaSelect.value = currentCategoryValue; }
+      if (!categoriaSelect) return;
+      const currentCategoryValue = categoriaSelect.value; 
+      categoriaSelect.innerHTML = '<option value="">Selecciona una categoría...</option>';
+      categories.forEach(category => { 
+          const option = document.createElement('option');
+          option.value = category;
+          option.textContent = category;
+          categoriaSelect.appendChild(option);
+      });
+      if (categories.includes(currentCategoryValue)) categoriaSelect.value = currentCategoryValue;
   };
 
   const populateResourceTypeSelect = (types = resourceTypes) => {
-       if (!tipoSelect) return;
-       const currentTypeValue = tipoSelect.value; tipoSelect.innerHTML = '<option value="">Selecciona un tipo...</option>';
-       const sortedTypes = [...types].sort((a, b) => a.localeCompare(b));
-       sortedTypes.forEach(type => { const option = document.createElement('option'); option.value = type; option.textContent = type; tipoSelect.appendChild(option); });
-       if (types.includes(currentTypeValue)) { tipoSelect.value = currentTypeValue; } else { tipoSelect.value = ""; }
+      if (!tipoSelect) return;
+      const currentTypeValue = tipoSelect.value; 
+      tipoSelect.innerHTML = '<option value="">Selecciona un tipo...</option>';
+      types.forEach(type => { 
+          const option = document.createElement('option');
+          option.value = type;
+          option.textContent = type;
+          tipoSelect.appendChild(option);
+      });
+      if (types.includes(currentTypeValue)) tipoSelect.value = currentTypeValue;
+      else tipoSelect.value = ""; 
   };
 
   const handleAddCategory = (event) => {
-       event.preventDefault(); const newCategoryInput = document.getElementById('newCategoryName'); if (!newCategoryInput) return;
-       const newCategoryName = newCategoryInput.value.trim();
-       if (newCategoryName) {
-           const upperNewCategoryName = newCategoryName.toUpperCase();
-           if (!categories.some(cat => cat.toUpperCase() === upperNewCategoryName)) {
-               Swal.showLoading(); google.script.run.withSuccessHandler(onCategoryAdded).withFailureHandler(e => handleFailure(e, "Añadir Categoría")).addCategory(upperNewCategoryName); newCategoryInput.value = '';
-           } else { showErrorAlert('Categoría Duplicada', 'La categoría "' + escapeHtml(newCategoryName) + '" ya existe.'); newCategoryInput.focus(); }
-       } else { showErrorAlert('Campo Vacío', 'El nombre no puede estar vacío.'); newCategoryInput.focus(); }
+      event.preventDefault();
+      const newCategoryInput = document.getElementById('newCategoryName');
+      if (!newCategoryInput) return;
+      const newCategoryName = newCategoryInput.value.trim();
+      if (newCategoryName) {
+          const upperNewCategoryName = newCategoryName.toUpperCase();
+          if (!categories.some(cat => cat.toUpperCase() === upperNewCategoryName)) {
+              Swal.showLoading();
+              google.script.run.withSuccessHandler(onCategoryAdded)
+                  .withFailureHandler(e => handleFailure(e, "Añadir Categoría"))
+                  .addCategory(upperNewCategoryName);
+              newCategoryInput.value = '';
+          } else {
+              showErrorAlert('Categoría Duplicada', `La categoría "${escapeHtml(newCategoryName)}" ya existe.`);
+              newCategoryInput.focus();
+          }
+      } else {
+          showErrorAlert('Campo Vacío', 'El nombre de la categoría no puede estar vacío.');
+          newCategoryInput.focus();
+      }
   };
 
   function onCategoryAdded(result) {
       Swal.close();
       if (result && result.success && result.added) {
-          showAlert('Categoría "' + escapeHtml(result.category) + '" añadida.'); highlightedCategory = result.category; google.script.run.withSuccessHandler(onCategoriesLoadedAfterUpdate).withFailureHandler(e => handleFailure(e, "Recargar Categorías")).getCategories();
-      } else if (result && result.success && !result.added) { showErrorAlert('Categoría Duplicada', 'La categoría "' + escapeHtml(result.category) + '" ya existe.'); }
-      else { handleFailure(result || { message: 'Error desconocido al añadir.' }, "Añadir Categoría"); }
+          showAlert(`Categoría "${escapeHtml(result.category)}" añadida.`);
+          google.script.run.withSuccessHandler(onCategoriesLoadedAfterUpdate)
+              .withFailureHandler(e => handleFailure(e, "Recargar Categorías"))
+              .getCategories(); 
+      } else if (result && result.success && !result.added) {
+          showErrorAlert('Categoría Duplicada', `La categoría "${escapeHtml(result.category)}" ya existe.`);
+      } else {
+          handleFailure(result || { message: 'Error desconocido al añadir.' }, "Añadir Categoría");
+      }
   }
 
-  function onCategoriesLoadedAfterUpdate(result) {
-      if (result && result.success) { categories = Array.isArray(result.data) ? result.data : []; renderCategoryLists(); populateCategorySelect(); }
-      else { handleFailure(result || { message: "Error al recargar categorías." }, "Recargar Categorías"); }
+  function onCategoriesLoadedAfterUpdate(result) { 
+      if (result && result.success) {
+          categories = Array.isArray(result.data) ? result.data.sort((a,b) => a.localeCompare(b)) : [];
+          renderHorizontalCategoryTags();
+          populateCategorySelect();
+          filterAndApplyPagination(); 
+      } else {
+          handleFailure(result || { message: "Error al recargar categorías." }, "Recargar Categorías");
+      }
   }
 
   const handleStartEditCategory = (event) => {
-      const btn = event.currentTarget; const li = btn.closest('li'); if (!li) return;
-      const currentlyEditingLi = categoryListUlModal.querySelector('li.editing'); if (currentlyEditingLi && currentlyEditingLi !== li) { const cancelBtn = currentlyEditingLi.querySelector('.cancel-category-btn'); if (cancelBtn) cancelBtn.click(); }
-      const categoryName = li.dataset.categoryName; const displayDiv = li.querySelector('.category-display'); const actionsDiv = li.querySelector('.category-actions'); if (!displayDiv || !actionsDiv || !categoryName) return;
-      li.dataset.originalHtml = li.innerHTML; li.classList.add('editing');
-      displayDiv.innerHTML = '<input type="text" class="category-edit-input flex-grow px-2 py-1 border border-primary rounded" value="' + escapeHtml(categoryName) + '" data-original-name="' + escapeHtml(categoryName) + '">';
-      actionsDiv.innerHTML = '<button class="save-category-btn action-btn text-green-600 hover:bg-green-100" title="Guardar"><i class="fas fa-check"></i></button><button class="cancel-category-btn action-btn text-red-600 hover:bg-red-100" title="Cancelar"><i class="fas fa-times"></i></button>';
-      const saveBtn = actionsDiv.querySelector('.save-category-btn'); const cancelBtn = actionsDiv.querySelector('.cancel-category-btn'); const inputField = displayDiv.querySelector('input.category-edit-input');
-      if (saveBtn) saveBtn.addEventListener('click', handleSaveCategoryEdit); if (cancelBtn) cancelBtn.addEventListener('click', handleCancelCategoryEdit); if (inputField) { inputField.focus(); inputField.select(); }
+      const btn = event.currentTarget; 
+      const li = btn.closest('li'); 
+      if (!li) return;  
+      const currentlyEditingLi = categoryListUlModal.querySelector('li.editing'); 
+      if (currentlyEditingLi && currentlyEditingLi !== li) { 
+          const cancelBtn = currentlyEditingLi.querySelector('.cancel-category-btn'); 
+          if (cancelBtn) cancelBtn.click(); 
+      }  
+      const categoryName = li.dataset.categoryName; 
+      const displayDiv = li.querySelector('.category-display'); 
+      const actionsDiv = li.querySelector('.category-actions'); 
+      if (!displayDiv || !actionsDiv || !categoryName) return;  
+      li.dataset.originalHtml = li.innerHTML; 
+      li.classList.add('editing');  
+      displayDiv.innerHTML = `<input type="text" class="category-edit-input flex-grow px-2 py-1 border border-primary rounded-md" value="${escapeHtml(categoryName)}" data-original-name="${escapeHtml(categoryName)}">`;
+      actionsDiv.innerHTML = `<button class="save-category-btn action-btn text-green-600 hover:bg-green-100" title="Guardar"><i class="fas fa-check"></i></button>
+                              <button class="cancel-category-btn action-btn text-red-600 hover:bg-red-100" title="Cancelar"><i class="fas fa-times"></i></button>`;
+      const saveBtn = actionsDiv.querySelector('.save-category-btn'); 
+      const cancelBtn = actionsDiv.querySelector('.cancel-category-btn'); 
+      const inputField = displayDiv.querySelector('input.category-edit-input');
+      if (saveBtn) saveBtn.addEventListener('click', handleSaveCategoryEdit); 
+      if (cancelBtn) cancelBtn.addEventListener('click', handleCancelCategoryEdit); 
+      if (inputField) { inputField.focus(); inputField.select(); }
   };
 
   const handleSaveCategoryEdit = (event) => {
-      const btn = event.currentTarget; const li = btn.closest('li'); const input = li && li.querySelector('.category-edit-input'); if (!input || !li) return;
-      const originalName = input.dataset.originalName; const newName = input.value.trim(); if (!newName) { showErrorAlert('Nombre Vacío', 'El nombre no puede estar vacío.'); input.focus(); return; }
-      const upperNewName = newName.toUpperCase(); if (upperNewName === originalName.toUpperCase()) { const cancelBtn = li.querySelector('.cancel-category-btn'); if (cancelBtn) handleCancelCategoryEdit({ currentTarget: cancelBtn }); return; }
-      if (categories.some(cat => cat.toUpperCase() === upperNewName)) { showErrorAlert('Categoría Duplicada', 'La categoría "' + escapeHtml(newName) + '" ya existe.'); input.focus(); return; }
-      Swal.showLoading(); google.script.run.withSuccessHandler(onCategoryUpdated).withFailureHandler(e => handleFailure(e, "Actualizar Categoría")).updateCategory(originalName, upperNewName);
+      const btn = event.currentTarget; 
+      const li = btn.closest('li'); 
+      const input = li && li.querySelector('.category-edit-input'); 
+      if (!input || !li) return;  
+      const originalName = input.dataset.originalName; 
+      const newName = input.value.trim(); 
+      if (!newName) { 
+          showErrorAlert('Nombre Vacío', 'El nombre de la categoría no puede estar vacío.'); 
+          input.focus(); return; 
+      }  
+      const upperNewName = newName.toUpperCase(); 
+      if (upperNewName === originalName.toUpperCase()) { 
+          const cancelBtn = li.querySelector('.cancel-category-btn'); 
+          if (cancelBtn) handleCancelCategoryEdit({ currentTarget: cancelBtn }); 
+          return; 
+      }  
+      if (categories.some(cat => cat.toUpperCase() === upperNewName && cat.toUpperCase() !== originalName.toUpperCase())) { 
+          showErrorAlert('Categoría Duplicada', `La categoría "${escapeHtml(newName)}" ya existe.`); 
+          input.focus(); return; 
+      }  
+      Swal.showLoading(); 
+      google.script.run.withSuccessHandler(onCategoryUpdated)
+          .withFailureHandler(e => handleFailure(e, "Actualizar Categoría"))
+          .updateCategory(originalName, upperNewName);
   };
 
   function onCategoryUpdated(result) {
       Swal.close();
-      if (result && result.success) { showAlert('Categoría actualizada.'); highlightedCategory = result.newName; loadInitialData(); }
-      else { showErrorAlert('Error al Actualizar', (result && result.message) ? result.message : 'Error desconocido.'); const li = categoryListUlModal.querySelector('li.editing'); const cancelBtn = li && li.querySelector('.cancel-category-btn'); if (cancelBtn) cancelBtn.click(); }
+      if (result && result.success) {
+          showAlert('Categoría actualizada.');
+          if (highlightedCategory === result.oldName) {
+              highlightedCategory = result.newName;
+          }
+          loadInitialData(); 
+      } else {
+          showErrorAlert('Error al Actualizar', (result && result.message) ? result.message : 'Error desconocido.');
+          const li = categoryListUlModal.querySelector('li.editing');
+          const cancelBtn = li && li.querySelector('.cancel-category-btn');
+          if (cancelBtn) cancelBtn.click();
+      }
   }
 
   const handleCancelCategoryEdit = (event) => {
-      const btn = event.currentTarget; const li = btn.closest('li'); if (!li || !li.dataset.originalHtml) return;
-      li.innerHTML = li.dataset.originalHtml; li.classList.remove('editing'); delete li.dataset.originalHtml;
-      const editBtn = li.querySelector('.edit-category-btn'); if (editBtn) editBtn.addEventListener('click', handleStartEditCategory);
+      const btn = event.currentTarget; 
+      const li = btn.closest('li'); 
+      if (!li || !li.dataset.originalHtml) return;  
+      li.innerHTML = li.dataset.originalHtml; 
+      li.classList.remove('editing'); 
+      delete li.dataset.originalHtml;  
+      const editBtn = li.querySelector('.edit-category-btn'); 
+      if (editBtn) editBtn.addEventListener('click', handleStartEditCategory);
   };
 
-  const filterAndRender = () => {
-      if (!searchInput || !resources) return; const searchTerm = searchInput.value.toLowerCase().trim(); const safeResources = Array.isArray(resources) ? resources : [];
-      filteredResources = searchTerm ? safeResources.filter(r => [r.nombre, r.descripcion, r.categoria, r.tipo, r.autor, r.url, r.estatus, r.recursosAdicionales].some(field => field && String(field).toLowerCase().includes(searchTerm))) : [...safeResources];
-      renderCards();
+  const filterAndApplyPagination = () => {
+      if (!resources) { 
+          allFilteredForPagination = [];
+      } else {
+          const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
+          let tempResources = [...resources];
+
+          if (searchTerm) {
+              tempResources = tempResources.filter(r => 
+                  [r.nombre, r.descripcion, r.categoria, r.tipo, r.autor, r.url, r.estatus, r.recursosAdicionales]
+                  .some(field => field && String(field).toLowerCase().includes(searchTerm))
+              );
+          }
+
+          if (highlightedCategory !== ALL_CATEGORIES_FILTER) {
+              tempResources = tempResources.filter(r => (r.categoria || 'Sin categoría') === highlightedCategory);
+          }
+          
+          let activeResources = tempResources.filter(r => r.estatus === 'Activo');
+          let inactiveResources = tempResources.filter(r => r.estatus === 'Inactivo');
+
+          currentSortCriteria = sortResourcesDropdown ? sortResourcesDropdown.value : 'default';
+          
+          activeResources.sort((a, b) => {
+              if (currentSortCriteria === 'favorites_first' || currentSortCriteria === 'default') {
+                if (a.favorito !== b.favorito) return b.favorito - a.favorito; 
+              }
+              
+              let sortVal = 0;
+              switch (currentSortCriteria) {
+                  case 'name_desc': sortVal = (b.nombre || '').localeCompare(a.nombre || ''); break;
+                  case 'clicks_desc': sortVal = (Number(b.clicks) || 0) - (Number(a.clicks) || 0); break;
+                  case 'clicks_asc': sortVal = (Number(a.clicks) || 0) - (Number(b.clicks) || 0); break;
+                  case 'recent': // Fallback a nombre si no hay fecha
+                  case 'name_asc': sortVal = (a.nombre || '').localeCompare(b.nombre || ''); break;
+                  case 'default': // Aplicar sub-ordenamiento después de favoritos
+                        if (a.favorito && b.favorito) { // Ambos son favoritos
+                            const clicksDiff = (Number(b.clicks) || 0) - (Number(a.clicks) || 0); // Más clicks primero
+                            if (clicksDiff !== 0) return clicksDiff;
+                            return (a.nombre || '').localeCompare(b.nombre || ''); // Luego por nombre
+                        }
+                        // Si solo uno es favorito, ya se manejó arriba. Si ninguno es favorito:
+                        const clicksDiff = (Number(b.clicks) || 0) - (Number(a.clicks) || 0);
+                        if (clicksDiff !== 0) return clicksDiff;
+                        return (a.nombre || '').localeCompare(b.nombre || '');
+                  case 'favorites_first': // Si ambos son favoritos o ambos no lo son, ordenar por nombre
+                        return (a.nombre || '').localeCompare(b.nombre || '');
+                  default: sortVal = (a.nombre || '').localeCompare(b.nombre || ''); break;
+              }
+              return sortVal;
+          });
+          allFilteredForPagination = [...activeResources, ...inactiveResources]; 
+      }
+      
+      currentlyDisplayedCount = 0; 
+      
+      const isSearchOrFilterActive = (searchInput && searchInput.value.trim() !== '') || highlightedCategory !== ALL_CATEGORIES_FILTER;
+      
+      if (isSearchOrFilterActive) {
+          renderCards(allFilteredForPagination); 
+          if (loadMoreBtn) loadMoreBtn.classList.add('hidden');
+      } else {
+          displayNextBatchOfResources(); 
+      }
+      
+      if (totalResourcesCountSpan) {
+          totalResourcesCountSpan.textContent = `Total: ${allFilteredForPagination.length} recursos`;
+      }
+  };
+  
+  const displayNextBatchOfResources = () => {
+      const newCount = currentlyDisplayedCount + (currentlyDisplayedCount === 0 ? INITIAL_RESOURCES_TO_DISPLAY : RESOURCES_INCREMENT);
+      const batchToRender = allFilteredForPagination.slice(0, newCount);
+      renderCards(batchToRender); 
+      currentlyDisplayedCount = batchToRender.length;
+      
+      if (loadMoreBtn) {
+          if (currentlyDisplayedCount < allFilteredForPagination.length) {
+              loadMoreBtn.classList.remove('hidden');
+          } else {
+              loadMoreBtn.classList.add('hidden');
+          }
+      }
   };
 
-  const getNoResultsMessage = () => { const searchTerm = searchInput.value.trim(); if (searchTerm) return 'No hay recursos que coincidan con "' + escapeHtml(searchTerm) + '".'; if (Array.isArray(resources) && resources.length > 0) return 'No hay recursos para mostrar.'; return 'No hay recursos para mostrar. ¡Añade uno nuevo!'; };
+  const getNoResultsMessageText = () => {
+      const searchTerm = searchInput ? searchInput.value.trim() : '';
+      if (searchTerm && allFilteredForPagination.length === 0) return `No hay recursos que coincidan con "${escapeHtml(searchTerm)}".`;
+      if (highlightedCategory !== ALL_CATEGORIES_FILTER && allFilteredForPagination.length === 0) return `No hay recursos en la categoría "${escapeHtml(highlightedCategory)}"${searchTerm ? ' que coincidan con tu búsqueda' : ''}.`;
+      if (Array.isArray(resources) && resources.length > 0 && allFilteredForPagination.length === 0) return 'Ningún recurso coincide con los filtros actuales.';
+      return 'No hay recursos para mostrar. ¡Intenta añadir uno nuevo!';
+  };
 
-  const renderCards = () => {
-      if (!cardViewContainer || !noResourcesMessage) return; cardViewContainer.innerHTML = ''; const searchTerm = searchInput.value.toLowerCase().trim();
-      if (filteredResources.length === 0) { noResourcesMessage.textContent = getNoResultsMessage(); noResourcesMessage.classList.remove('hidden'); cardViewContainer.appendChild(noResourcesMessage); }
-      else {
-          noResourcesMessage.classList.add('hidden'); const groupedResources = filteredResources.reduce((acc, resource) => { const categoryKey = resource.categoria || 'Sin categoría'; (acc[categoryKey] = acc[categoryKey] || []).push(resource); return acc; }, {});
-          const sortedGroupKeys = Object.keys(groupedResources).sort((a, b) => { if (a === 'Sin categoría') return 1; if (b === 'Sin categoría') return -1; return a.localeCompare(b); });
-          sortedGroupKeys.forEach(categoryKey => {
-              const categoryResources = groupedResources[categoryKey];
-              categoryResources.sort((a, b) => { const inactive = (a.estatus === 'Inactivo') - (b.estatus === 'Inactivo'); if (inactive) return inactive; const fav = (b.favorito ? 1 : 0) - (a.favorito ? 1 : 0); if (fav) return fav; const clicks = (Number(b.clicks) || 0) - (Number(a.clicks) || 0); if (clicks) return clicks; return (a.nombre || '').localeCompare(b.nombre || ''); });
-              const groupDiv = document.createElement('div'); groupDiv.className = 'category-group'; const header = document.createElement('h2'); header.className = 'category-group-header'; header.id = generateCategoryId(categoryKey); header.textContent = categoryKey; groupDiv.appendChild(header);
-              const gridDiv = document.createElement('div'); gridDiv.className = 'category-card-grid'; categoryResources.forEach(resource => gridDiv.appendChild(createCardElement(resource, searchTerm))); groupDiv.appendChild(gridDiv); cardViewContainer.appendChild(groupDiv);
+  const renderCards = (resourcesToRender) => {
+      if (!cardViewContainer || !noResourcesMessage) return;
+      cardViewContainer.innerHTML = ''; 
+      const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
+
+      if (resourcesToRender.length === 0) {
+          noResourcesMessage.textContent = getNoResultsMessageText();
+          noResourcesMessage.classList.remove('hidden');
+          noResourcesMessage.classList.add('col-span-full'); 
+          cardViewContainer.appendChild(noResourcesMessage);
+      } else {
+          noResourcesMessage.classList.add('hidden'); 
+          resourcesToRender.forEach(resource => {
+              const cardElement = createCardElement(resource, searchTerm);
+              if (cardElement) { 
+                  cardViewContainer.appendChild(cardElement);
+              }
           });
       }
-       addEventListenersToView(cardViewContainer);
+      addEventListenersToView(cardViewContainer);
   };
-
+  
   const createCardElement = (resource, searchTerm) => {
-       const card = document.createElement('div'); const isInactive = resource.estatus === 'Inactivo'; card.className = 'resource-card ' + (isInactive ? 'inactive' : ''); card.dataset.resourceId = resource.id;
-       const highlight = (text) => { if (!searchTerm || typeof text !== 'string' || text === '') return escapeHtml(text || '-'); try { const regex = new RegExp('(' + searchTerm.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + ')', 'gi'); return escapeHtml(text).replace(regex, '<span class="highlight">$1</span>'); } catch (e) { return escapeHtml(text); } };
-       const resourceId = resource.id ? escapeHtml(String(resource.id)) : ''; const resourceEstatus = resource.estatus || 'Activo';
-       let detailsHtml = '<div class="details-section">'; if (resource.descripcion) { detailsHtml += '<div><strong>Descripción:</strong><div class="description">' + highlight(resource.descripcion) + '</div></div>'; } if (resource.autor) { detailsHtml += '<div><strong>Autor:</strong><div class="autor">' + highlight(resource.autor) + '</div></div>'; } if (resource.recursosAdicionales) { detailsHtml += '<div><strong>Adicional:</strong><div class="additional-resources">' + highlight(resource.recursosAdicionales).replace(/\n/g, '<br>') + '</div></div>'; } detailsHtml += '</div>'; const hasDetails = resource.descripcion || resource.autor || resource.recursosAdicionales;
-       let innerHTML = '<div class="card-visible-content">'; innerHTML += '<h3 title="' + escapeHtml(resource.nombre) + '">' + highlight(resource.nombre) + '</h3>'; if(resource.tipo){ innerHTML += '<div class="type-display">Tipo: ' + highlight(resource.tipo) + '</div>'; } innerHTML += '<div class="url-section">'; innerHTML += '<a href="#" class="url-link" data-id="' + resourceId + '" title="Abrir: ' + escapeHtml(resource.url || '') + '">'; innerHTML += '<i class="fas fa-link"></i>' + truncateUrl(resource.url) + '</a>'; innerHTML += '</div></div>'; innerHTML += detailsHtml;
-       innerHTML += '<footer class="mt-auto pt-2 border-t border-gray-200 flex justify-between items-center text-xs text-gray-500">'; innerHTML += '<div class="status-info">'; innerHTML += createActionButton('fav', resource); innerHTML += '<span class="status status-' + escapeHtml(resourceEstatus.toLowerCase()) + '">' + escapeHtml(resourceEstatus) + '</span>'; innerHTML += '<span class="click-count flex items-center" title="Veces abierto"><i class="fas fa-mouse-pointer mr-1"></i> ' + (resource.clicks || 0) + '</span>'; innerHTML += '</div>'; innerHTML += '<div class="card-actions">'; if (hasDetails) { innerHTML += '<button class="action-btn expand-details-btn" title="Mostrar detalles"><i class="fas fa-plus"></i></button>'; } innerHTML += createActionButton('edit', resource); innerHTML += createActionButton('delete', resource); innerHTML += '</div></footer>';
-       card.innerHTML = innerHTML; if (!hasDetails) { const detailsSectionEl = card.querySelector('.details-section'); if(detailsSectionEl) detailsSectionEl.style.display = 'none'; }
-       return card;
+      if (!resource || !resource.id) return null; 
+      const card = document.createElement('div'); 
+      const isInactive = resource.estatus === 'Inactivo'; 
+      card.className = 'resource-card ' + (isInactive ? 'inactive' : ''); 
+      card.dataset.resourceId = resource.id;
+      const highlight = (text) => { 
+          if (!searchTerm || typeof text !== 'string' || text === '') return escapeHtml(text || '-'); 
+          try { 
+              const regex = new RegExp('(' + searchTerm.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + ')', 'gi'); 
+              return escapeHtml(text).replace(regex, '<span class="highlight">$1</span>'); 
+          } catch (e) { return escapeHtml(text); } 
+      };  
+      const resourceId = resource.id ? escapeHtml(String(resource.id)) : ''; 
+      const resourceEstatus = resource.estatus || 'Activo';  
+      let detailsHtml = '<div class="details-section">'; 
+      if (resource.descripcion) { detailsHtml += '<div><strong>Descripción:</strong><div class="description">' + highlight(resource.descripcion) + '</div></div>'; } 
+      if (resource.autor) { detailsHtml += '<div><strong>Autor:</strong><div class="autor">' + highlight(resource.autor) + '</div></div>'; } 
+      if (resource.recursosAdicionales) { detailsHtml += '<div><strong>Adicional:</strong><div class="additional-resources">' + highlight(resource.recursosAdicionales).replace(/\n/g, '<br>') + '</div></div>'; } 
+      detailsHtml += '</div>'; 
+      const hasDetails = resource.descripcion || resource.autor || resource.recursosAdicionales;  
+      let innerHTML = '<div class="card-visible-content">'; 
+      innerHTML += '<h3 title="' + escapeHtml(resource.nombre) + '">' + highlight(resource.nombre) + '</h3>'; 
+      if(resource.categoria){ innerHTML += `<div class="category-display">CAT: ${highlight(resource.categoria)}</div>`; }
+      if(resource.tipo){ innerHTML += `<div class="type-display">Tipo: ${highlight(resource.tipo)}</div>`; } 
+      innerHTML += '<div class="url-section">'; 
+      innerHTML += '<a href="#" class="url-link" data-id="' + resourceId + '" title="Abrir: ' + escapeHtml(resource.url || '') + '">'; 
+      innerHTML += '<i class="fas fa-link"></i>' + truncateUrl(resource.url) + '</a>'; 
+      innerHTML += '</div></div>'; 
+      innerHTML += detailsHtml;  
+      innerHTML += '<footer class="mt-auto pt-2 border-t border-gray-200 flex justify-between items-center text-xs text-gray-500">'; 
+      innerHTML += '<div class="status-info">'; 
+      innerHTML += createActionButton('fav', resource); 
+      innerHTML += '<span class="status status-' + escapeHtml(resourceEstatus.toLowerCase()) + '">' + escapeHtml(resourceEstatus) + '</span>'; 
+      innerHTML += '<span class="click-count flex items-center" title="Veces abierto"><i class="fas fa-mouse-pointer mr-1"></i> ' + (resource.clicks || 0) + '</span>'; 
+      innerHTML += '</div>'; 
+      innerHTML += '<div class="card-actions">'; 
+      if (hasDetails) { innerHTML += '<button class="action-btn expand-details-btn" title="Mostrar detalles"><i class="fas fa-plus"></i></button>'; } 
+      innerHTML += createActionButton('edit', resource); 
+      innerHTML += createActionButton('delete', resource); 
+      innerHTML += '</div></footer>';  
+      card.innerHTML = innerHTML; 
+      if (!hasDetails) { 
+          const detailsSectionEl = card.querySelector('.details-section'); 
+          if(detailsSectionEl) detailsSectionEl.style.display = 'none'; 
+      }  
+      return card;
   };
 
   const createActionButton = (type, resource) => {
-      const isInactive = resource.estatus === 'Inactivo'; const escapedId = resource.id ? escapeHtml(String(resource.id)) : ''; if (!escapedId) return ''; let buttonHtml = ''; const baseClass = 'action-btn p-1 rounded '; const disabledAttr = isInactive ? ' disabled ' : ''; const disabledClass = isInactive ? ' opacity-50 cursor-not-allowed ' : '';
-      switch(type) {
-          case 'fav': const isFavorited = resource.favorito === true; const favTitle = isFavorited ? 'Quitar de favoritos' : 'Marcar como favorito'; const favColor = isFavorited ? 'favorited text-yellow-500' : 'text-gray-400'; buttonHtml = '<button class="action-btn btn-fav ' + favColor + ' hover:text-yellow-500 ' + disabledClass + '" data-id="' + escapedId + '" title="' + favTitle + '"' + disabledAttr + '><i class="fas fa-star"></i></button>'; break;
-          case 'edit': buttonHtml = '<button class="' + baseClass + ' btn-edit text-blue-500 hover:text-blue-700 hover:bg-blue-100 ' + disabledClass + '" data-id="' + escapedId + '" title="Editar recurso"' + disabledAttr + '><i class="fas fa-pencil-alt"></i></button>'; break;
-          case 'delete': const iconClass = isInactive ? 'fa-undo' : 'fa-ban'; const title = isInactive ? 'Reactivar recurso' : 'Marcar como Inactivo'; const colorClass = isInactive ? 'text-green-500 hover:text-green-700 hover:bg-green-100' : 'text-red-500 hover:text-red-700 hover:bg-red-100'; buttonHtml = '<button class="' + baseClass + ' btn-delete ' + colorClass + ' ml-1" data-id="' + escapedId + '" title="' + title + '"><i class="fas ' + iconClass + '"></i></button>'; break;
-          default: buttonHtml = '';
+      const isInactive = resource.estatus === 'Inactivo'; const escapedId = resource.id ? escapeHtml(String(resource.id)) : ''; if (!escapedId) return ''; let buttonHtml = ''; const baseClass = 'action-btn p-1 rounded '; const disabledAttr = isInactive && type !== 'delete' ? ' disabled ' : ''; const disabledClass = isInactive && type !== 'delete' ? ' opacity-50 cursor-not-allowed ' : '';  
+      switch(type) {  
+          case 'fav': const isFavorited = resource.favorito === true; const favTitle = isFavorited ? 'Quitar de favoritos' : 'Marcar como favorito'; const favColor = isFavorited ? 'favorited text-yellow-500' : 'text-gray-400'; buttonHtml = '<button class="action-btn btn-fav ' + favColor + ' hover:text-yellow-500 ' + disabledClass + '" data-id="' + escapedId + '" title="' + favTitle + '"' + disabledAttr + '><i class="fas fa-star"></i></button>'; break;  
+          case 'edit': buttonHtml = '<button class="' + baseClass + ' btn-edit text-blue-500 hover:text-blue-700 hover:bg-blue-100 ' + disabledClass + '" data-id="' + escapedId + '" title="Editar recurso"' + disabledAttr + '><i class="fas fa-pencil-alt"></i></button>'; break;  
+          case 'delete': const iconClass = isInactive ? 'fa-undo' : 'fa-ban'; const title = isInactive ? 'Reactivar recurso' : 'Marcar como Inactivo'; const colorClass = isInactive ? 'text-green-500 hover:text-green-700 hover:bg-green-100' : 'text-red-500 hover:text-red-700 hover:bg-red-100'; buttonHtml = '<button class="' + baseClass + ' btn-delete ' + colorClass + ' ml-1" data-id="' + escapedId + '" title="' + title + '"><i class="fas ' + iconClass + '"></i></button>'; break;  
+          default: buttonHtml = '';  
       } return buttonHtml;
   };
 
   const addEventListenersToView = (viewContainer) => {
-       if (!viewContainer) return;
-       viewContainer.onclick = (event) => {
-           const target = event.target; const actionButton = target.closest('.action-btn'); const urlLink = target.closest('.url-link');
-           if (actionButton && !actionButton.disabled) {
-               const card = actionButton.closest('.resource-card'); const id = card ? card.dataset.resourceId : null;
-               if (actionButton.classList.contains('expand-details-btn')) {
-                   if (card) { const detailsSection = card.querySelector('.details-section'); const icon = actionButton.querySelector('i'); if (detailsSection && icon) { const isExpanding = !detailsSection.classList.contains('expanded'); detailsSection.classList.toggle('expanded', isExpanding); icon.className = isExpanding ? 'fas fa-minus' : 'fas fa-plus'; actionButton.title = isExpanding ? 'Ocultar detalles' : 'Mostrar detalles'; } }
-               } else if (id) {
-                   if (actionButton.classList.contains('btn-fav')) handleToggleFavorite(id); else if (actionButton.classList.contains('btn-edit')) handleEditResource(id); else if (actionButton.classList.contains('btn-delete')) handleToggleStatusResource(id);
-               }
-           } else if (urlLink) { event.preventDefault(); const id = urlLink.dataset.id; if (id) handleUrlClick(id); }
-       };
+      if (!viewContainer) return;
+      viewContainer.onclick = (event) => {
+          const target = event.target; const actionButton = target.closest('.action-btn'); const urlLink = target.closest('.url-link');  
+          if (actionButton && !actionButton.disabled) {  
+              const card = actionButton.closest('.resource-card'); const id = card ? card.dataset.resourceId : null;  
+              if (actionButton.classList.contains('expand-details-btn')) {  
+                  if (card) { const detailsSection = card.querySelector('.details-section'); const icon = actionButton.querySelector('i'); if (detailsSection && icon) { const isExpanding = !detailsSection.classList.contains('expanded'); detailsSection.classList.toggle('expanded', isExpanding); icon.className = isExpanding ? 'fas fa-minus' : 'fas fa-plus'; actionButton.title = isExpanding ? 'Ocultar detalles' : 'Mostrar detalles'; } }  
+              } else if (id) {  
+                  if (actionButton.classList.contains('btn-fav')) handleToggleFavorite(id); else if (actionButton.classList.contains('btn-edit')) handleEditResource(id); else if (actionButton.classList.contains('btn-delete')) handleToggleStatusResource(id);  
+              }  
+          } else if (urlLink) { event.preventDefault(); const id = urlLink.dataset.id; if (id) handleUrlClick(id); }  
+      };
   };
 
   const openResourceModal = (isEditMode = false, resourceData = null) => {
-      if (!resourceModal || !resourceForm || !resourceModalTitle || !resourceIdInput) return; editMode = isEditMode; resourceForm.reset(); resourceIdInput.value = ''; populateCategorySelect(); populateResourceTypeSelect();
-      if (isEditMode && resourceData) {
-          resourceModalTitle.textContent = 'Editar Recurso'; resourceIdInput.value = resourceData.id || '';
-          const nombreInput = document.getElementById('nombre'); const descInput = document.getElementById('descripcion'); const urlInput = document.getElementById('url'); const catSelect = document.getElementById('categoria'); const tipoSelectModal = document.getElementById('tipo'); const autorInput = document.getElementById('autor'); const addInput = document.getElementById('recursosAdicionales');
-          if (nombreInput) nombreInput.value = resourceData.nombre || ''; if (descInput) descInput.value = resourceData.descripcion || ''; if (urlInput) urlInput.value = resourceData.url || ''; if (catSelect) catSelect.value = resourceData.categoria || ''; if (tipoSelectModal) tipoSelectModal.value = resourceData.tipo || ''; if (autorInput) autorInput.value = resourceData.autor || ''; if (addInput) addInput.value = resourceData.recursosAdicionales || '';
-      } else { resourceModalTitle.textContent = 'Añadir Nuevo Recurso'; }
+      if (!resourceModal || !resourceForm || !resourceModalTitle || !resourceIdInput) return; editMode = isEditMode; resourceForm.reset(); resourceIdInput.value = ''; populateCategorySelect(); populateResourceTypeSelect();  
+      if (isEditMode && resourceData) {  
+          resourceModalTitle.textContent = 'Editar Recurso'; resourceIdInput.value = resourceData.id || '';  
+          const nombreInput = document.getElementById('nombre'); const descInput = document.getElementById('descripcion'); const urlInput = document.getElementById('url'); const catSelect = document.getElementById('categoria'); const tipoSelectModal = document.getElementById('tipo'); const autorInput = document.getElementById('autor'); const addInput = document.getElementById('recursosAdicionales');  
+          if (nombreInput) nombreInput.value = resourceData.nombre || ''; if (descInput) descInput.value = resourceData.descripcion || ''; if (urlInput) urlInput.value = resourceData.url || ''; if (catSelect) catSelect.value = resourceData.categoria || ''; if (tipoSelectModal) tipoSelectModal.value = resourceData.tipo || ''; if (autorInput) autorInput.value = resourceData.autor || ''; if (addInput) addInput.value = resourceData.recursosAdicionales || '';  
+      } else { resourceModalTitle.textContent = 'Añadir Nuevo Recurso'; }  
       resourceModal.style.display = 'flex'; const nombreInput = document.getElementById('nombre'); if (nombreInput) nombreInput.focus();
   };
   const closeResourceModal = () => { if (resourceModal) resourceModal.style.display = 'none'; };
-  const openCategoryModal = () => { if (!categoryModal) return; renderCategoryLists(); categoryModal.style.display = 'flex'; const catNameInput = document.getElementById('newCategoryName'); if (catNameInput) catNameInput.focus(); };
-  const closeCategoryModal = () => { if (!categoryModal) return; const cancelBtn = categoryModal.querySelector('li.editing .cancel-category-btn'); if (cancelBtn) cancelBtn.click(); categoryModal.style.display = 'none'; };
-
-  const handleResourceFormSubmit = (event) => {
-       event.preventDefault(); if (!resourceForm) return;
-       const formData = new FormData(resourceForm);
-       const resourceData = { nombre: formData.get('nombre') ? formData.get('nombre').trim() : '', descripcion: formData.get('descripcion') ? formData.get('descripcion').trim() : '', url: formData.get('url') ? formData.get('url').trim() : '', categoria: formData.get('categoria') ? formData.get('categoria').trim() : '', tipo: formData.get('tipo') ? formData.get('tipo').trim() : '', autor: formData.get('autor') ? formData.get('autor').trim() : '', recursosAdicionales: formData.get('recursosAdicionales') ? formData.get('recursosAdicionales').trim() : '', id: editMode ? resourceIdInput.value : null };
-       const requiredFields = ['nombre', 'url', 'categoria', 'tipo']; const missingFields = requiredFields.filter(field => !resourceData[field]);
-       if (missingFields.length > 0) { showErrorAlert('Campos Obligatorios', 'Por favor, completa: ' + missingFields.join(', ') + '.'); const firstMissingInput = document.getElementById(missingFields[0]); if (firstMissingInput) firstMissingInput.focus(); return; }
-       let formattedUrl = resourceData.url; if (formattedUrl && !formattedUrl.startsWith('http://') && !formattedUrl.startsWith('https://')) { formattedUrl = 'https://' + formattedUrl; } resourceData.url = formattedUrl;
-       Swal.showLoading(); const serverFunction = editMode ? 'updateResource' : 'addResource';
-       google.script.run.withSuccessHandler(onResourceSaved).withFailureHandler(e => handleFailure(e, editMode ? "Actualizar Recurso" : "Añadir Recurso"))[serverFunction](resourceData);
+  const openCategoryModal = () => { 
+      if (!categoryModal) return; 
+      google.script.run.withSuccessHandler(onCategoriesLoadedForModal).withFailureHandler(e => handleFailure(e, "Cargar Categorías para Modal")).getCategories();
+      categoryModal.style.display = 'flex'; 
+      const catNameInput = document.getElementById('newCategoryName'); 
+      if (catNameInput) catNameInput.focus(); 
+  };
+  function onCategoriesLoadedForModal(result) { 
+      if (result && result.success) {
+          const modalCategories = Array.isArray(result.data) ? result.data.sort((a,b) => a.localeCompare(b)) : [];
+          if(categoryListUlModal) {
+              categoryListUlModal.innerHTML = ''; 
+              const showNoCatMsg = modalCategories.length === 0;
+              if(noCategoriesItemModal) noCategoriesItemModal.classList.toggle('hidden', !showNoCatMsg);
+              if(showNoCatMsg && !categoryListUlModal.contains(noCategoriesItemModal)) {
+                 categoryListUlModal.appendChild(noCategoriesItemModal);
+              }
+              modalCategories.forEach(category => {
+                  const liModal = document.createElement('li'); liModal.dataset.categoryName = category;  
+                  liModal.innerHTML = '<div class="category-display flex-grow mr-4"><span>' + escapeHtml(category) + '</span></div><div class="category-actions"><button class="edit-category-btn action-btn" title="Editar ' + escapeHtml(category) + '"><i class="fas fa-pencil-alt"></i></button></div>';  
+                  const editBtnModal = liModal.querySelector('.edit-category-btn'); if (editBtnModal) editBtnModal.addEventListener('click', handleStartEditCategory); categoryListUlModal.appendChild(liModal);
+              });
+          }
+      } else {
+           if(categoryListUlModal && noCategoriesItemModal) { 
+              categoryListUlModal.innerHTML = '';
+              noCategoriesItemModal.classList.remove('hidden');
+              categoryListUlModal.appendChild(noCategoriesItemModal);
+           }
+      }
+  }
+  const closeCategoryModal = () => { 
+      if (!categoryModal) return; 
+      const currentlyEditingLi = categoryModal.querySelector('li.editing');
+      if (currentlyEditingLi) {
+          const cancelBtn = currentlyEditingLi.querySelector('.cancel-category-btn');
+          if (cancelBtn) cancelBtn.click();
+      }
+      categoryModal.style.display = 'none'; 
   };
 
+  const handleResourceFormSubmit = (event) => {
+      event.preventDefault(); if (!resourceForm) return;  
+      const formData = new FormData(resourceForm);  
+      const resourceData = { nombre: formData.get('nombre') ? formData.get('nombre').trim() : '', descripcion: formData.get('descripcion') ? formData.get('descripcion').trim() : '', url: formData.get('url') ? formData.get('url').trim() : '', categoria: formData.get('categoria') ? formData.get('categoria').trim() : '', tipo: formData.get('tipo') ? formData.get('tipo').trim() : '', autor: formData.get('autor') ? formData.get('autor').trim() : '', recursosAdicionales: formData.get('recursosAdicionales') ? formData.get('recursosAdicionales').trim() : '', id: editMode ? resourceIdInput.value : null };  
+      const requiredFields = ['nombre', 'url', 'categoria', 'tipo']; const missingFields = requiredFields.filter(field => !resourceData[field]);  
+      if (missingFields.length > 0) { showErrorAlert('Campos Obligatorios', 'Por favor, completa: ' + missingFields.join(', ') + '.'); const firstMissingInput = document.getElementById(missingFields[0]); if (firstMissingInput) firstMissingInput.focus(); return; }  
+      let formattedUrl = resourceData.url; if (formattedUrl && !formattedUrl.startsWith('http://') && !formattedUrl.startsWith('https://')) { formattedUrl = 'https://' + formattedUrl; } resourceData.url = formattedUrl;  
+      Swal.showLoading(); const serverFunction = editMode ? 'updateResource' : 'addResource';  
+      google.script.run.withSuccessHandler(onResourceSaved).withFailureHandler(e => handleFailure(e, editMode ? "Actualizar Recurso" : "Añadir Recurso"))[serverFunction](resourceData);
+  };
   function onResourceSaved(result) {
-      Swal.close();
-      if (result && result.success) {
-          showAlert(editMode ? 'Recurso actualizado' : 'Recurso añadido'); closeResourceModal(); loadInitialData();
-          const targetCategory = (result.data && result.data.categoria) ? result.data.categoria : 'Sin categoría';
-          setTimeout(() => { try { const categoryGroupId = generateCategoryId(targetCategory); const groupElement = document.getElementById(categoryGroupId); if (groupElement) { groupElement.scrollIntoView({ behavior: 'smooth', block: 'start' }); highlightedCategory = targetCategory === 'Sin categoría' ? null : targetCategory; renderCategoryLists(); } else { if (mainContent) mainContent.scrollTo({ top: 0, behavior: 'smooth' }); } } catch (e) { if (mainContent) mainContent.scrollTo({ top: 0, behavior: 'smooth' }); } }, 300);
+      Swal.close();  
+      if (result && result.success) {  
+          showAlert(editMode ? 'Recurso actualizado' : 'Recurso añadido'); closeResourceModal(); 
+          loadInitialData(); 
       } else { handleFailure(result || { message: 'Error desconocido al guardar.' }, editMode ? "Actualizar Recurso" : "Añadir Recurso"); }
-  }
+  };
 
   const handleEditResource = (id) => { const resourceToEdit = resources.find(r => String(r.id) === String(id)); if (resourceToEdit) { openResourceModal(true, resourceToEdit); } else { showErrorAlert('Error Interno', 'No se pudo encontrar el recurso.'); } };
   const handleToggleStatusResource = async (id) => { const index = resources.findIndex(r => String(r.id) === String(id)); if (index === -1) { showErrorAlert('Error Interno', 'No se pudo encontrar el recurso.'); return; } const resource = resources[index]; const currentlyInactive = resource.estatus === 'Inactivo'; const actionText = currentlyInactive ? 'reactivar' : 'marcar inactivo'; const newStatus = currentlyInactive ? 'Activo' : 'Inactivo'; const confirmTitle = '¿' + (actionText.charAt(0).toUpperCase() + actionText.slice(1)) + ' este recurso?'; const confirmButtonText = currentlyInactive ? 'Sí, reactivar' : 'Sí, marcar inactivo'; const result = await showConfirmation( confirmTitle, 'Recurso: "' + escapeHtml(resource.nombre) + '"', confirmButtonText, 'Cancelar', !currentlyInactive ); if (result.isConfirmed) { Swal.showLoading(); google.script.run.withSuccessHandler(onStatusUpdated).withFailureHandler(e => handleFailure(e, "Actualizar Estado")).updateResourceStatus(id, newStatus); } };
-  function onStatusUpdated(result) { Swal.close(); if (result && result.success) { showAlert('Recurso ' + (result.newStatus === 'Activo' ? 'reactivado' : 'inactivo') + '.'); const index = resources.findIndex(r => String(r.id) === String(result.id)); if (index !== -1) { resources[index].estatus = result.newStatus; if (result.favoritoRemoved) resources[index].favorito = false; filterAndRender(); } else { loadInitialData(); } } else { handleFailure(result, "Actualizar Estado"); } }
+  function onStatusUpdated(result) { Swal.close(); if (result && result.success) { showAlert('Recurso ' + (result.newStatus === 'Activo' ? 'reactivado' : 'inactivo') + '.'); const index = resources.findIndex(r => String(r.id) === String(result.id)); if (index !== -1) { resources[index].estatus = result.newStatus; if (result.favoritoRemoved) resources[index].favorito = false; filterAndApplyPagination(); renderHorizontalCategoryTags(); } else { loadInitialData(); } } else { handleFailure(result, "Actualizar Estado"); } };
   const handleToggleFavorite = (id) => { const index = resources.findIndex(r => String(r.id) === String(id)); if (index === -1) { showErrorAlert('Error Interno', 'No se pudo encontrar el recurso.'); return; } const resource = resources[index]; if (resource.estatus === 'Inactivo') { showAlert('Acción no permitida', 'info', 'Recursos inactivos no pueden ser favoritos.'); return; } const newFavoriteState = !resource.favorito; google.script.run.withSuccessHandler(onFavoriteUpdated).withFailureHandler(e => handleFailure(e, "Actualizar Favorito")).updateResourceFavorite(id, newFavoriteState); };
-   function onFavoriteUpdated(result) { if (result && result.success) { showAlert(result.isFavorite ? 'Marcado como favorito.' : 'Quitado de favoritos.'); const index = resources.findIndex(r => String(r.id) === String(result.id)); if (index !== -1) { resources[index].favorito = result.isFavorite; filterAndRender(); } else { loadInitialData(); } } else { handleFailure(result, "Actualizar Favorito"); } }
+  function onFavoriteUpdated(result) { if (result && result.success) { showAlert(result.isFavorite ? 'Marcado como favorito.' : 'Quitado de favoritos.'); const index = resources.findIndex(r => String(r.id) === String(result.id)); if (index !== -1) { resources[index].favorito = result.isFavorite; filterAndApplyPagination(); } else { loadInitialData(); } } else { handleFailure(result, "Actualizar Favorito"); } };
   const handleUrlClick = (id) => { const index = resources.findIndex(r => String(r.id) === String(id)); if (index === -1) { showErrorAlert('Error Interno', 'No se pudo encontrar el recurso.'); return; } const resource = resources[index]; let url = resource.url; if (!url) { showErrorAlert('URL Vacía', 'Este recurso no tiene URL.'); return; } if (!url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url; try { window.open(url, '_blank', 'noopener,noreferrer'); } catch (e) { console.error("Error al abrir URL:", e); showErrorAlert('Error al Abrir', 'No se pudo abrir la URL: ' + e.message); return; } const currentClicks = Number(resource.clicks) || 0; resources[index].clicks = currentClicks + 1; const cardElement = cardViewContainer && cardViewContainer.querySelector('.resource-card[data-resource-id="' + id + '"]'); const clicksSpan = cardElement && cardElement.querySelector('.click-count'); if (clicksSpan) { clicksSpan.innerHTML = '<i class="fas fa-mouse-pointer mr-1"></i> ' + resources[index].clicks; } google.script.run.withSuccessHandler(onClickIncremented).withFailureHandler(onClickIncrementFailed).incrementResourceClick(id); };
-  function onClickIncremented(result) { if (result && result.success) { const index = resources.findIndex(r => String(r.id) === String(result.id)); if (index !== -1 && resources[index].clicks !== result.clicks) { resources[index].clicks = result.clicks; } } else { onClickIncrementFailed(result); } }
-  function onClickIncrementFailed(error) { console.error("Error al registrar click:", (error && error.message) ? error.message : error); }
-
-  function toggleSidebar(forceOpen = null) { if (!sidebar || !document.body) return; const isOpen = document.body.classList.contains('sidebar-open'); const newStateOpen = (typeof forceOpen === 'boolean') ? forceOpen : !isOpen; document.body.classList.toggle('sidebar-open', newStateOpen); }
+  function onClickIncremented(result) { if (result && result.success) { const index = resources.findIndex(r => String(r.id) === String(result.id)); if (index !== -1 && resources[index].clicks !== result.clicks) { resources[index].clicks = result.clicks; } } else { onClickIncrementFailed(result); } };
+  function onClickIncrementFailed(error) { console.error("Error al registrar click:", (error && error.message) ? error.message : error); };
 
   document.addEventListener('DOMContentLoaded', () => {
-      addResourceBtn = document.getElementById('addResourceBtn'); manageCategoriesBtnSidebar = document.getElementById('manageCategoriesBtnSidebar'); resourceModal = document.getElementById('resourceModal'); categoryModal = document.getElementById('categoryModal'); closeResourceModalBtn = document.getElementById('closeResourceModalBtn'); closeCategoryModalBtn = document.getElementById('closeCategoryModalBtn'); cancelResourceBtn = document.getElementById('cancelResourceBtn'); doneCategoryBtn = document.getElementById('doneCategoryBtn'); resourceForm = document.getElementById('resourceForm'); addCategoryForm = document.getElementById('addCategoryForm'); cardViewContainer = document.getElementById('cardView'); resourceModalTitle = document.getElementById('resourceModalTitle'); resourceIdInput = document.getElementById('resourceId'); noResourcesMessage = document.getElementById('no-resources-message'); noCategoriesItemModal = document.getElementById('no-categories-item-modal'); noSidebarCategories = document.getElementById('no-sidebar-categories'); searchInput = document.getElementById('searchInput'); categoryListUlModal = document.getElementById('categoryListModal'); sidebarCategoryListUl = document.getElementById('sidebarCategoryList'); categoriaSelect = document.getElementById('categoria'); tipoSelect = document.getElementById('tipo'); mainContent = document.getElementById('mainContent'); hamburgerBtn = document.getElementById('hamburgerBtn'); sidebar = document.getElementById('sidebar');
-      const essentialElements = [addResourceBtn, manageCategoriesBtnSidebar, resourceModal, categoryModal, resourceForm, addCategoryForm, searchInput, cardViewContainer, noResourcesMessage, mainContent, closeResourceModalBtn, closeCategoryModalBtn, cancelResourceBtn, doneCategoryBtn, tipoSelect, hamburgerBtn, sidebar];
-      if (essentialElements.some(el => !el)) { console.error("Error crítico: No se encontraron elementos DOM."); showErrorAlert("Error de Inicialización", "Faltan elementos clave."); return; }
-      addResourceBtn.addEventListener('click', () => openResourceModal()); manageCategoriesBtnSidebar.addEventListener('click', openCategoryModal); closeResourceModalBtn.addEventListener('click', closeResourceModal); closeCategoryModalBtn.addEventListener('click', closeCategoryModal); cancelResourceBtn.addEventListener('click', closeResourceModal); doneCategoryBtn.addEventListener('click', closeCategoryModal); resourceForm.addEventListener('submit', handleResourceFormSubmit); addCategoryForm.addEventListener('submit', handleAddCategory); searchInput.addEventListener('input', filterAndRender); hamburgerBtn.addEventListener('click', () => toggleSidebar());
-      document.addEventListener('click', (event) => { if (window.innerWidth <= 1024 && document.body.classList.contains('sidebar-open')) { if (!sidebar.contains(event.target) && !hamburgerBtn.contains(event.target)) { toggleSidebar(false); } } });
-      window.addEventListener('click', (event) => { if (event.target === resourceModal) closeResourceModal(); if (event.target === categoryModal) closeCategoryModal(); });
-      window.addEventListener('keydown', (event) => { if (event.key === 'Escape') { if (resourceModal && resourceModal.style.display === 'flex') closeResourceModal(); if (categoryModal && categoryModal.style.display === 'flex') closeCategoryModal(); if (window.innerWidth <= 1024 && document.body.classList.contains('sidebar-open')) { toggleSidebar(false); } } });
+      addResourceBtn = document.getElementById('addResourceBtn');
+      manageCategoriesBtnHeader = document.getElementById('manageCategoriesBtnHeader');
+      resourceModal = document.getElementById('resourceModal');
+      categoryModal = document.getElementById('categoryModal');
+      closeResourceModalBtn = document.getElementById('closeResourceModalBtn');
+      closeCategoryModalBtn = document.getElementById('closeCategoryModalBtn');
+      cancelResourceBtn = document.getElementById('cancelResourceBtn');
+      doneCategoryBtn = document.getElementById('doneCategoryBtn');
+      resourceForm = document.getElementById('resourceForm');
+      addCategoryForm = document.getElementById('addCategoryForm');
+      cardViewContainer = document.getElementById('cardView');
+      resourceModalTitle = document.getElementById('resourceModalTitle');
+      resourceIdInput = document.getElementById('resourceId');
+      noResourcesMessage = document.getElementById('no-resources-message');
+      noCategoriesItemModal = document.getElementById('no-categories-item-modal');
+      searchInput = document.getElementById('searchInput');
+      categoryListUlModal = document.getElementById('categoryListModal');
+      categoriaSelect = document.getElementById('categoria');
+      tipoSelect = document.getElementById('tipo');
+      categoryTagsContainer = document.getElementById('categoryTags');
+      categoryTagsPlaceholder = document.getElementById('category-tags-placeholder');
+      totalResourcesCountSpan = document.getElementById('totalResourcesCount');
+      sortResourcesDropdown = document.getElementById('sortResourcesDropdown');
+      loadMoreBtn = document.getElementById('loadMoreBtn');
+      
+      const essentialElements = [
+          addResourceBtn, manageCategoriesBtnHeader, resourceModal, categoryModal, 
+          resourceForm, addCategoryForm, searchInput, cardViewContainer, noResourcesMessage, 
+          closeResourceModalBtn, closeCategoryModalBtn, cancelResourceBtn, 
+          doneCategoryBtn, tipoSelect, categoriaSelect, categoryTagsContainer, categoryTagsPlaceholder,
+          totalResourcesCountSpan, sortResourcesDropdown, loadMoreBtn
+      ];
+      if (essentialElements.some(el => !el)) {
+          console.error("Error crítico: No se encontraron todos los elementos DOM esenciales. Verifique los IDs en Index.html.");
+          showErrorAlert("Error de Inicialización", "Faltan elementos clave en la página. La aplicación podría no funcionar correctamente.");
+      }
+
+      addResourceBtn.addEventListener('click', () => openResourceModal());
+      manageCategoriesBtnHeader.addEventListener('click', openCategoryModal);
+      closeResourceModalBtn.addEventListener('click', closeResourceModal);
+      closeCategoryModalBtn.addEventListener('click', closeCategoryModal);
+      cancelResourceBtn.addEventListener('click', closeResourceModal);
+      doneCategoryBtn.addEventListener('click', closeCategoryModal);
+      resourceForm.addEventListener('submit', handleResourceFormSubmit);
+      addCategoryForm.addEventListener('submit', handleAddCategory);
+      searchInput.addEventListener('input', filterAndApplyPagination);
+      sortResourcesDropdown.addEventListener('change', filterAndApplyPagination);
+      loadMoreBtn.addEventListener('click', displayNextBatchOfResources);
+      
+      window.addEventListener('click', (event) => {
+          if (event.target === resourceModal) closeResourceModal();
+          if (event.target === categoryModal) closeCategoryModal();
+      });
+      window.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') {
+              if (resourceModal && resourceModal.style.display === 'flex') closeResourceModal();
+              if (categoryModal && categoryModal.style.display === 'flex') closeCategoryModal();
+          }
+      });
+
       loadInitialData();
   });
 </script>
